@@ -1,0 +1,747 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>비전 검사 작업대</title>
+<style>
+:root{color-scheme:light;--ink:#192b38;--muted:#465d6f;--line:#d7e2e9;--accent:#145f77;--soft:#e9f5f7;--bg:#f4f7fa;--danger:#9c392c;--green:#246540}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 Inter,"Malgun Gothic",system-ui,sans-serif}
+[hidden]{display:none!important}
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default;opacity:.55}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,a:focus-visible{outline:3px solid #1689a6;outline-offset:3px}
+header{background:#152c37;color:#fff;padding:14px clamp(16px,5vw,60px);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+header strong{font-size:18px;letter-spacing:-.03em}
+header span{font-size:13px;color:#cfdee5}
+main{max-width:1200px;margin:auto;padding:32px 20px 60px}
+h1,h2,h3,p{margin:0}
+h1{font-size:clamp(26px,4vw,36px);line-height:1.2;letter-spacing:-.04em}
+h2{font-size:20px;letter-spacing:-.02em}
+h3{font-size:16px}
+p,small{color:var(--muted)}
+small{font-size:13px}
+.page-head,.row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.page-head{margin-bottom:22px}
+.page-head p{margin-top:7px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(245px,100%),1fr));gap:18px}
+.card,.panel{background:#fff;border:1px solid var(--line);border-radius:13px;overflow:hidden}
+.panel{padding:22px;margin-bottom:16px}
+.card>button{display:block;width:100%;padding:0;text-align:left;color:inherit;background:white;border:0}
+.card>button:hover{background:#f6fbfc}
+.card img{width:100%;height:155px;object-fit:cover;display:block;background:#253542}
+.card-content{padding:16px}
+.card-content p{margin-top:6px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:white;color:var(--ink);border-radius:8px;padding:8px 13px;font-weight:600}
+.btn:hover{background:#f2f7fa}
+.primary,.primary:hover{background:var(--accent);border-color:var(--accent);color:white}
+.back{margin-bottom:16px}
+.pill{display:inline-block;background:var(--soft);color:#17566c;border-radius:30px;padding:3px 10px;font-size:13px;font-weight:600}
+nav{display:flex;flex-wrap:wrap;gap:5px;border-bottom:1px solid var(--line);margin-bottom:18px}
+nav button{background:none;border:0;border-bottom:3px solid transparent;color:var(--muted);padding:10px 12px;font-weight:650}
+nav button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
+.columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+label{display:block;font-weight:600;margin:12px 0 7px}
+input[type=text],textarea,select{width:100%;padding:8px;border:1px solid #b9ccd7;border-radius:7px;background:white;color:var(--ink)}
+textarea{resize:vertical}
+input[type=file]{width:100%;color:var(--ink)}
+.panel p,.panel .actions{margin-top:8px}
+.note{padding:9px 12px;background:#ebf4f8;border-radius:7px}
+.steps{padding-left:22px;color:var(--muted)}
+.table-wrap{overflow:auto}
+table{border-collapse:collapse;width:100%;margin-top:10px;font-size:14px}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{color:var(--muted);font-weight:650}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0}
+.metric{padding:12px;background:#f4f8fa;border-radius:8px;color:var(--muted)}
+.metric strong{display:block;font-size:25px;color:var(--ink)}
+.bar-row{display:grid;grid-template-columns:minmax(95px,160px) 1fr minmax(28px,auto);gap:10px;align-items:center;margin:9px 0}
+.bar-track{height:9px;background:#e6edf2;border-radius:20px;overflow:hidden}
+.bar-track span{display:block;background:#18859a;height:100%;border-radius:20px}
+.thumb{display:block;width:68px;height:52px;object-fit:contain;background:#e8eef3;border-radius:5px}
+.review-image{display:block;width:100%;max-height:400px;object-fit:contain;background:#eef3f6;border-radius:8px;margin-top:10px}
+#notice{margin:0 0 14px;padding:9px 12px;background:#e5f3ef;color:#235943;border-radius:7px}
+#notice.error{background:#faece7;color:var(--danger)}
+dialog{max-width:min(94vw,490px);width:100%;border:1px solid var(--line);border-radius:12px;padding:22px;color:var(--ink)}
+dialog::backdrop{background:#10222d99}
+fieldset{padding:0;border:0;margin:0}
+.checks label{display:inline-flex;gap:7px;align-items:center;margin:7px 12px 7px 0}
+@media(max-width:640px){main{padding:22px 12px}.panel{padding:15px}.columns{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:7px}.bar-row{grid-template-columns:minmax(75px,120px) 1fr auto}}
+</style>
+</head>
+<body>
+<header><strong>비전 검사 작업대</strong><span>중간평가 데모 · 브라우저 저장</span></header>
+<main>
+  <div id="notice" role="status" hidden></div>
+  <div id="view"></div>
+</main>
+<dialog id="product-dialog">
+  <form id="product-form">
+    <h2>제품 등록</h2>
+    <label for="product-name">제품명</label>
+    <input id="product-name" type="text" required maxlength="60" placeholder="예: 패키지 X120">
+    <label for="product-types">불량 유형</label>
+    <textarea id="product-types" rows="4" placeholder="한 줄에 한 유형"></textarea>
+    <p><small>기업 검사 기준에 맞춰 입력하세요. 등록 후 학습 탭에서 수정할 수 있습니다.</small></p>
+    <div class="actions" style="margin-top:14px">
+      <button class="btn primary" type="submit">제품 추가</button>
+      <button class="btn" id="cancel-product" type="button">닫기</button>
+    </div>
+  </form>
+</dialog>
+<script>
+"use strict";
+
+const NORMAL = "정상";
+const DEFECT = "불량";
+const REVIEW = "검토 대기";
+const CHECK_NORMAL = "정상 재검사 불일치";
+const CHECK_TYPE = "불량 유형 미확정";
+const REVIEW_REASONS = [CHECK_NORMAL, CHECK_TYPE];
+const SAMPLE_TYPES = {
+  chip: ["모서리 파손", "오염"],
+  tile: ["균열", "기공", "표면 얼룩"],
+};
+const TABS = ["학습", "검사", "관리자 검토", "결과 분석"];
+const byId = id => document.getElementById(id);
+const app = byId("view");
+let db;
+let products = [];
+let currentId = null;
+let currentTab = "학습";
+let selectedRun = null;
+let selectedReview = null;
+let busy = false;
+const objectUrls = [];
+
+function element(tag, text, options = {}) {
+  const item = document.createElement(tag);
+  if (text !== undefined) item.textContent = text;
+  for (const [key, value] of Object.entries(options)) item.setAttribute(key, value);
+  return item;
+}
+
+function button(label, action, primary = false) {
+  const item = element("button", label, {type:"button", class:primary ? "btn primary" : "btn"});
+  item.addEventListener("click", action);
+  return item;
+}
+
+function panel(title) {
+  const section = element("section", undefined, {class:"panel"});
+  section.append(element("h2", title));
+  return section;
+}
+
+function container(className, ...children) {
+  const div = element("div", undefined, {class:className});
+  div.append(...children);
+  return div;
+}
+
+function notify(message = "", error = false) {
+  const notice = byId("notice");
+  notice.textContent = message;
+  notice.hidden = !message;
+  notice.className = error ? "error" : "";
+}
+
+function fileInput(label, id) {
+  const input = element("input", undefined, {id, type:"file", accept:"image/png,image/jpeg,image/webp,image/bmp", multiple:""});
+  const labelElement = element("label", label, {for:id});
+  return {input, label:labelElement};
+}
+
+function selectInput(id, options, value) {
+  const select = element("select", undefined, {id});
+  for (const choice of options) {
+    const label = typeof choice === "string" ? choice : choice.label;
+    const key = typeof choice === "string" ? choice : choice.value;
+    select.add(new Option(label, key));
+  }
+  if (value) select.value = value;
+  return select;
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open("product-visual-inspection", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("products", {keyPath:"id"});
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function readProducts() {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction("products").objectStore("products").getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function storeProduct(product) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction("products", "readwrite");
+    const store = transaction.objectStore("products");
+    const snapshot = {...product, revision:(product.revision || 0) + 1};
+    const lookup = store.get(product.id);
+    let conflict = false;
+    lookup.onsuccess = () => {
+      if ((lookup.result?.revision || 0) !== (product.revision || 0)) {
+        conflict = true;
+        transaction.abort();
+      } else {
+        store.put(snapshot);
+      }
+    };
+    transaction.oncomplete = () => resolve(snapshot);
+    transaction.onabort = () => reject(conflict
+      ? new Error("다른 탭에서 이 제품의 내용을 변경했습니다. 불러온 내용을 확인한 뒤 다시 시도하세요.")
+      : transaction.error);
+  });
+}
+
+async function saveProduct(product) {
+  const snapshot = await storeProduct(product);
+  const index = products.findIndex(item => item.id === product.id);
+  if (index === -1) products.push(snapshot);
+  else products[index] = snapshot;
+}
+
+async function perform(work, success) {
+  if (busy) return;
+  busy = true;
+  app.inert = true;
+  notify("처리 중입니다.");
+  try {
+    await work();
+    render();
+    notify(success);
+  } catch (error) {
+    if (error?.message.startsWith("다른 탭에서")) {
+      products = await readProducts();
+      render();
+    }
+    notify(error?.message || "처리할 수 없습니다. 파일 형식과 브라우저 저장 공간을 확인하세요.", true);
+  } finally {
+    app.inert = false;
+    busy = false;
+  }
+}
+
+function makeProduct(id, name, types, sample = null) {
+  return {id, name, types, sample, data:[], model:null, runs:[]};
+}
+
+function parseTypes(value) {
+  const types = [...new Set(value.split(/[\n,]/).map(type => type.trim()).filter(Boolean))];
+  if (types.some(type => [NORMAL, DEFECT, REVIEW].includes(type))) {
+    throw new Error("‘정상’, ‘불량’, ‘검토 대기’는 판정 상태입니다. 구체적인 불량 이름을 입력하세요.");
+  }
+  return types;
+}
+
+function enterProduct(product) {
+  currentId = product.id;
+  currentTab = "학습";
+  selectedRun = null;
+  selectedReview = null;
+  notify();
+  render();
+}
+
+function render() {
+  for (const url of objectUrls.splice(0)) URL.revokeObjectURL(url);
+  app.replaceChildren();
+  const product = products.find(item => item.id === currentId);
+  if (product) renderProduct(product);
+  else renderHome();
+}
+
+function renderHome() {
+  const heading = container("",
+    element("h1", "제품별 검사"),
+    element("p", "제품을 선택해 학습 데이터를 등록하고 검사하세요."));
+  app.append(container("page-head", heading,
+    button("제품 등록", () => byId("product-dialog").showModal(), true)));
+  const grid = container("cards");
+  for (const product of products) {
+    const open = button(product.name, () => enterProduct(product));
+    open.replaceChildren(
+      container("card-content",
+        element("h2", product.name),
+        element("p", ["불량 유형 " + product.types.length + "개", "검사 " + product.runs.length + "회"].join(" · ")),
+        element("span", product.model ? "학습 v" + product.model.version : "학습 전", {class:"pill"})));
+    if (product.sample) {
+      const cover = sampleCanvas(product.sample, 0, 0, true);
+      open.prepend(element("img", undefined, {src:cover.toDataURL(), alt:"", width:"280", height:"155"}));
+    } else if (product.data[0]?.file) {
+      const preview = imageThumbnail(product.data[0]);
+      preview.alt = "";
+      preview.className = "";
+      open.prepend(preview);
+    }
+    grid.append(container("card", open));
+  }
+  app.append(grid);
+}
+
+function setTab(tab) {
+  currentTab = tab;
+  notify();
+  render();
+}
+
+function renderProduct(product) {
+  const back = button("제품 목록", () => { currentId = null; notify(); render(); });
+  back.classList.add("back");
+  app.append(back, container("page-head",
+    container("", element("h1", product.name), element("p", product.types.length ? product.types.join(" · ") : "불량 유형을 등록하세요.")),
+    element("span", product.model ? "사용 중인 모델 v" + product.model.version : "학습 전", {class:"pill"})));
+  const nav = element("nav", undefined, {"aria-label":"제품 메뉴"});
+  for (const tab of TABS) {
+    const item = button(tab, () => setTab(tab));
+    item.className = "";
+    item.setAttribute("aria-selected", String(currentTab === tab));
+    item.setAttribute("role", "tab");
+    nav.append(item);
+  }
+  nav.setAttribute("role", "tablist");
+  app.append(nav);
+  const renderTab = {"학습":renderTraining, "검사":renderInspection, "관리자 검토":renderReview, "결과 분석":renderAnalysis};
+  renderTab[currentTab](product);
+}
+
+function drawNoise(ctx, width, height, seed) {
+  let state = seed + 109;
+  const bitmap = ctx.getImageData(0, 0, width, height);
+  for (let offset = 0; offset < bitmap.data.length; offset += 4) {
+    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
+    const noise = (state % 17) - 8;
+    for (let channel = 0; channel < 3; channel++) bitmap.data[offset + channel] += noise;
+  }
+  ctx.putImageData(bitmap, 0, 0);
+}
+
+function sampleCanvas(kind, typeIndex, seed, cover = false) {
+  const canvas = element("canvas");
+  canvas.width = 280;
+  canvas.height = cover ? 155 : 210;
+  const ctx = canvas.getContext("2d");
+  const middle = canvas.height / 2;
+  const shift = seed % 5 - 2;
+  const backdrop = ctx.createLinearGradient(0, 0, 280, canvas.height);
+  backdrop.addColorStop(0, "#374a56");
+  backdrop.addColorStop(1, "#172832");
+  ctx.fillStyle = backdrop;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (kind === "tile") {
+    ctx.fillStyle = "#aeae9d";
+    ctx.beginPath();
+    ctx.ellipse(140, middle, 99, 56, -.12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#565b5b";
+    ctx.lineWidth = 13;
+    ctx.stroke();
+    if (typeIndex === 1) {
+      ctx.strokeStyle = "#372c25";
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.moveTo(105 + shift, middle - 42);
+      ctx.lineTo(145, middle + 7);
+      ctx.lineTo(125, middle + 45);
+      ctx.stroke();
+    } else if (typeIndex === 2) {
+      ctx.fillStyle = "#48463f";
+      for (const [x,y] of [[105,-10],[150,8],[166,-12],[128,21]]) {
+        ctx.beginPath();
+        ctx.arc(x + shift, middle + y, 11, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (typeIndex === 3) {
+      ctx.fillStyle = "#8d472b";
+      ctx.beginPath();
+      ctx.ellipse(159 + shift, middle + 6, 40, 27, .3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.fillStyle = "#b9a674";
+    for (let index = 0; index < 9; index++) {
+      ctx.fillRect(61, middle - 46 + index * 11, 20, 5);
+      ctx.fillRect(199, middle - 46 + index * 11, 20, 5);
+    }
+    ctx.fillStyle = "#607784";
+    ctx.fillRect(77, middle - 57, 126, 114);
+    ctx.fillStyle = "#293840";
+    ctx.fillRect(90, middle - 44, 100, 88);
+    ctx.fillStyle = "#94a9b0";
+    ctx.font = "11px monospace";
+    ctx.fillText("PKG 240", 116, middle + 4);
+    if (typeIndex === 1) {
+      ctx.fillStyle = "#b6c3c0";
+      ctx.beginPath();
+      ctx.moveTo(78, middle - 57);
+      ctx.lineTo(138 + shift, middle - 57);
+      ctx.lineTo(78, middle + 3);
+      ctx.fill();
+    } else if (typeIndex === 2) {
+      ctx.fillStyle = "#a8603e";
+      ctx.beginPath();
+      ctx.ellipse(164 + shift, middle + 17, 29, 24, .35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (typeIndex === -1) {
+    ctx.fillStyle = "#5d21b2";
+    ctx.fillRect(41, middle - 17, 198, 34);
+    ctx.fillStyle = "#eda247";
+    ctx.fillRect(109, middle - 42, 66, 87);
+  }
+  drawNoise(ctx, canvas.width, canvas.height, seed);
+  return canvas;
+}
+
+async function demoFile(kind, typeIndex, seed, name) {
+  const blob = await new Promise(resolve => sampleCanvas(kind, typeIndex, seed).toBlob(resolve, "image/png"));
+  return new File([blob], name, {type:"image/png"});
+}
+
+async function imageFeatures(file) {
+  let bitmap;
+  try { bitmap = await createImageBitmap(file); }
+  catch { throw new Error(file.name + " 이미지를 읽을 수 없습니다."); }
+  const canvas = element("canvas");
+  canvas.width = canvas.height = 32;
+  const ctx = canvas.getContext("2d", {willReadFrequently:true});
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 32, 32);
+  ctx.drawImage(bitmap, 0, 0, 32, 32);
+  bitmap.close();
+  const data = ctx.getImageData(0, 0, 32, 32).data;
+  const color = [];
+  const texture = [];
+  for (let y = 0; y < 32; y += 4) {
+    for (let x = 0; x < 32; x += 4) {
+      const sum = [0, 0, 0];
+      let edges = 0;
+      for (let dy = 0; dy < 4; dy++) {
+        for (let dx = 0; dx < 4; dx++) {
+          const offset = 4 * ((y + dy) * 32 + x + dx);
+          for (let channel = 0; channel < 3; channel++) sum[channel] += data[offset + channel];
+          if (dx < 3) {
+            for (let channel = 0; channel < 3; channel++) {
+              edges += Math.abs(data[offset + channel] - data[offset + 4 + channel]);
+            }
+          }
+        }
+      }
+      color.push(...sum.map(total => total / (16 * 255)));
+      texture.push(edges / (36 * 255));
+    }
+  }
+  return {color, texture};
+}
+
+function distance(a, b) {
+  return Math.sqrt(a.reduce((sum, value, index) => sum + (value - b[index]) ** 2, 0) / a.length);
+}
+
+function closest(feature, groups, key) {
+  return groups.map(group => ({
+    label:group.label,
+    distance:group.samples.reduce((best, sample) => Math.min(best, distance(feature[key], sample[key])), Infinity),
+  })).sort((a, b) => a.distance - b.distance);
+}
+
+async function labeledFiles(files, label) {
+  const entries = [];
+  for (const file of files) entries.push({label, name:file.name, file, features:await imageFeatures(file)});
+  return entries;
+}
+
+function buildModel(product) {
+  if (!product.types.length) throw new Error("불량 유형을 먼저 등록하세요.");
+  const groups = [NORMAL, ...product.types].map(label => ({
+    label, samples:product.data.filter(entry => entry.label === label).map(entry => entry.features),
+  }));
+  const missing = groups.filter(group => !group.samples.length).map(group => group.label);
+  if (missing.length) throw new Error("학습 이미지가 필요한 항목 · " + missing.join(", "));
+  return {
+    version:(product.model?.version || 0) + 1,
+    createdAt:new Date().toISOString(),
+    types:[...product.types],
+    trainingCount:groups.reduce((count, group) => count + group.samples.length, 0),
+    groups,
+  };
+}
+
+function classify(features, model) {
+  const scores = closest(features, model.groups, "color");
+  const types = scores.filter(score => score.label !== NORMAL);
+  const normal = scores.find(score => score.label === NORMAL);
+  const nearestType = types[0];
+  if (normal.distance <= nearestType.distance) {
+    const [textureMatch] = closest(features, model.groups, "texture");
+    if (textureMatch.label !== NORMAL) return {initial:NORMAL, status:REVIEW, reason:CHECK_NORMAL, types:[]};
+    return {initial:NORMAL, status:NORMAL, reason:"", types:[]};
+  }
+  const next = types[1];
+  if (nearestType.distance > .075 || (next && next.distance - nearestType.distance < .008)) {
+    return {initial:DEFECT, status:REVIEW, reason:CHECK_TYPE, types:[]};
+  }
+  return {initial:DEFECT, status:DEFECT, reason:"", types:[nearestType.label]};
+}
+
+function renderTraining(product) {
+  const setup = panel("불량 유형 설정");
+  const types = element("textarea", product.types.join("\n"), {id:"types", rows:"4"});
+  setup.append(element("label", "제품에서 관리할 불량 유형", {for:"types"}), types,
+    element("p", "한 줄에 한 유형을 입력하세요. 변경한 유형은 다음 학습부터 적용됩니다."),
+    container("actions", button("유형 저장", () => perform(async () => {
+      await saveProduct({...product, types:parseTypes(types.value)});
+    }, "제품의 불량 유형을 저장했습니다."))));
+
+  const data = panel("학습 이미지 등록");
+  const label = selectInput("training-label", [NORMAL, ...product.types]);
+  const files = fileInput("해당 유형의 이미지", "training-files");
+  data.append(element("p", "정상과 각 불량 유형의 이미지를 추가하세요. 추가 학습에도 이 화면을 사용합니다."),
+    element("label", "정답 유형", {for:"training-label"}), label, files.label, files.input,
+    container("actions", button("학습 데이터에 추가", () => perform(async () => {
+      const selected = [...files.input.files];
+      if (!selected.length) throw new Error("추가할 이미지를 선택하세요.");
+      const entries = await labeledFiles(selected, label.value);
+      await saveProduct({...product, data:[...product.data, ...entries]});
+    }, "선택한 제품의 학습 데이터에 추가했습니다."))));
+  const distribution = [NORMAL, ...product.types].map(type => [type, product.data.filter(item => item.label === type).length + "장"]);
+  data.append(table(["정답 유형","등록 이미지"], distribution));
+
+  const train = panel("모델 학습");
+  train.append(element("p", product.model
+    ? "현재 검사에 적용 중인 버전 v" + product.model.version + " · " + product.model.types.join(", ") + (product.model.trainingCount ? " · 학습 이미지 " + product.model.trainingCount + "장" : "")
+    : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다."));
+  const actions = container("actions", button(product.model ? "추가 학습 실행" : "학습 실행", () => perform(async () => {
+    await saveProduct({...product, model:buildModel(product)});
+  }, "이 제품의 학습을 완료했습니다."), true));
+  if (product.sample) actions.append(button("시연 데이터 추가", () => perform(async () => {
+    const dataEntries = [];
+    for (const [index, type] of [NORMAL, ...SAMPLE_TYPES[product.sample]].entries()) {
+      if (type !== NORMAL && !product.types.includes(type)) continue;
+      for (const seed of [3, 8, 14]) {
+        const file = await demoFile(product.sample, index, seed, "학습-" + index + "-" + seed + ".png");
+        dataEntries.push(...await labeledFiles([file], type));
+      }
+    }
+    const existing = new Set(product.data.map(entry => JSON.stringify([entry.label, entry.name])));
+    await saveProduct({...product, data:[...product.data, ...dataEntries.filter(entry => !existing.has(JSON.stringify([entry.label, entry.name])))]});
+  }, "합성 시연 이미지를 학습 데이터에 등록했습니다.")));
+  if (product.sample && !product.model) train.append(element("p", "시연 데이터 추가 후 학습 실행을 누르세요."));
+  train.append(actions, element("p", "데모 모델은 브라우저에서 학습 이미지의 색상과 질감 특징을 비교합니다.", {class:"note"}));
+  app.append(container("columns", setup, data), train);
+}
+
+function table(headers, rows) {
+  const item = element("table");
+  const head = item.createTHead().insertRow();
+  headers.forEach(label => head.append(element("th", label, {scope:"col"})));
+  const body = item.createTBody();
+  for (const row of rows) {
+    const line = body.insertRow();
+    for (const value of row) {
+      const cell = line.insertCell();
+      if (value instanceof Node) cell.append(value);
+      else cell.textContent = value;
+    }
+  }
+  return container("table-wrap", item);
+}
+
+async function runInspection(product, files, source) {
+  if (!product.model) throw new Error("학습 탭에서 제품 모델을 먼저 학습하세요.");
+  if (!files.length) throw new Error("검사할 이미지를 선택하세요.");
+  const records = [];
+  for (const file of files) {
+    records.push({name:file.name, file, ...classify(await imageFeatures(file), product.model)});
+  }
+  const run = {
+    id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
+    types:product.model.types, source, records,
+  };
+  await saveProduct({...product, runs:[run, ...product.runs]});
+  selectedRun = run.id;
+  selectedReview = null;
+  currentTab = "결과 분석";
+}
+
+function renderInspection(product) {
+  const section = panel("검사 이미지 업로드");
+  section.append(element("p", product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다." : "검사를 시작하려면 제품을 학습하세요."));
+  const files = fileInput("검사할 이미지", "inspection-files");
+  section.append(files.label, files.input);
+  const actions = container("actions");
+  const run = button("검사 실행", () => perform(() => runInspection(product, [...files.input.files], "업로드"), "검사를 완료했습니다."), true);
+  run.disabled = !product.model;
+  actions.append(run);
+  if (product.sample) {
+    const demo = button("시연 이미지 검사", () => perform(async () => {
+      const images = [];
+      for (const [index] of [NORMAL, ...SAMPLE_TYPES[product.sample]].entries()) {
+        images.push(await demoFile(product.sample, index, 23, "검사-" + (index + 1) + ".png"));
+      }
+      images.push(await demoFile(product.sample, -1, 27, "검사-추가사례.png"));
+      await runInspection(product, images, "합성 시연");
+    }, "합성 시연 이미지 검사를 완료했습니다."));
+    demo.disabled = !product.model;
+    actions.append(demo);
+  }
+  section.append(actions);
+  app.append(section);
+}
+
+function history(product) {
+  return product.runs.find(run => run.id === selectedRun) || product.runs[0];
+}
+
+function renderHistoryPicker(product, host, run) {
+  const options = product.runs.map(item => ({
+    value:item.id,
+    label:new Date(item.date).toLocaleString("ko-KR") + " · v" + item.version + " · " + item.source + " · " + item.records.length + "장",
+  }));
+  const select = selectInput("runs", options, run.id);
+  select.onchange = () => { selectedRun = select.value; selectedReview = null; render(); };
+  host.append(element("label", "검사 이력", {for:"runs"}), select);
+}
+
+function imageThumbnail(record, className = "thumb") {
+  const url = URL.createObjectURL(record.file);
+  objectUrls.push(url);
+  return element("img", undefined, {src:url, alt:record.name, class:className});
+}
+
+function resolvedStatus(record) { return record.final?.status || record.status; }
+function resolvedTypes(record) { return record.final?.types || record.types; }
+
+function renderReview(product) {
+  const section = panel("관리자 검토");
+  app.append(section);
+  const run = history(product);
+  if (!run) { section.append(element("p", "검사를 실행하면 확인이 필요한 이미지가 표시됩니다.")); return; }
+  renderHistoryPicker(product, section, run);
+  const queued = run.records.map((record, index) => ({record, index})).filter(({record}) => record.status === REVIEW);
+  if (!queued.length) { section.append(element("p", "이 검사에는 검토 요청이 없습니다.")); return; }
+  section.append(table(["이미지","사유","상태","확인"], queued.map(({record,index}) => [
+    record.name, record.reason, record.final ? "확정 · " + record.final.status : REVIEW,
+    button("열기", () => { selectedReview = index; render(); }),
+  ])));
+  const record = run.records[selectedReview ?? -1];
+  if (!record || record.status !== REVIEW) return;
+  const detail = panel(record.name);
+  detail.append(element("p", "1차 " + record.initial + " · " + record.reason), imageThumbnail(record, "review-image"));
+  const decision = selectInput("review-decision", ["선택",NORMAL,DEFECT], record.final?.status);
+  const fieldset = element("fieldset", undefined, {class:"checks"});
+  fieldset.append(element("legend", "최종 불량 유형"));
+  const choices = run.types.map(type => {
+    const check = element("input", undefined, {type:"checkbox", value:type});
+    check.checked = record.final?.types.includes(type) || false;
+    const caption = element("label");
+    caption.append(check, document.createTextNode(type));
+    fieldset.append(caption);
+    return check;
+  });
+  fieldset.hidden = decision.value !== DEFECT;
+  decision.onchange = () => { fieldset.hidden = decision.value !== DEFECT; };
+  detail.append(element("label", "최종 판정", {for:"review-decision"}), decision, fieldset,
+    container("actions", button("최종 판정 저장", () => perform(async () => {
+      if (![NORMAL,DEFECT].includes(decision.value)) throw new Error("최종 판정을 선택하세요.");
+      const types = decision.value === DEFECT ? choices.filter(check => check.checked).map(check => check.value) : [];
+      if (decision.value === DEFECT && !types.length) throw new Error("해당 불량 유형을 선택하세요.");
+      const records = run.records.map((entry, index) => index === selectedReview
+        ? {...entry, final:{status:decision.value, types}}
+        : entry);
+      const runs = product.runs.map(entry => entry.id === run.id ? {...entry, records} : entry);
+      await saveProduct({...product, runs});
+    }, "최종 판정을 제품 이력에 저장했습니다."), true)));
+  app.append(detail);
+}
+
+function renderBars(host, entries, scale) {
+  for (const [name,count] of entries) {
+    const fill = element("span");
+    fill.style.width = (100 * count / Math.max(1,scale)) + "%";
+    const track = container("bar-track", fill);
+    track.setAttribute("aria-hidden", "true");
+    host.append(container("bar-row", element("span", name), track, element("strong", count + "장")));
+  }
+}
+
+function renderAnalysis(product) {
+  const section = panel("검사 결과");
+  app.append(section);
+  const run = history(product);
+  if (!run) { section.append(element("p", "검사를 실행하면 제품별 결과와 리뷰 현황을 확인할 수 있습니다.")); return; }
+  renderHistoryPicker(product, section, run);
+  const size = run.records.length;
+  const statuses = [NORMAL,DEFECT,REVIEW];
+  const counts = statuses.map(status => run.records.filter(record => resolvedStatus(record) === status).length);
+  section.append(container("metrics", ...["전체 검사",...statuses].map((label,index) =>
+    container("metric", element("span", label), element("strong", index ? counts[index - 1] : size)))));
+  const types = panel("불량 유형별 발생 건수");
+  renderBars(types, run.types.map(type => [type,run.records.filter(record => resolvedStatus(record) === DEFECT && resolvedTypes(record).includes(type)).length]), counts[1]);
+  types.append(element("small", "한 이미지에 여러 유형을 확정하면 유형별로 집계합니다."));
+  const reviews = panel("관리자 검토 결과");
+  const countReview = run.records.filter(record => record.status === REVIEW).length;
+  reviews.append(element("p", "검토 요청 " + countReview + "장 · 전체의 " + (100 * countReview / size).toFixed(1) + "%"));
+  reviews.append(table(["검토 사유","요청","대기","정상 확정","불량 확정"], REVIEW_REASONS.map(reason => {
+    const matches = run.records.filter(record => record.reason === reason);
+    return [reason,matches.length,...[REVIEW,NORMAL,DEFECT].map(status => matches.filter(record => resolvedStatus(record) === status).length)];
+  })));
+  const detail = panel("이미지별 판정");
+  const results = run.records.map(record => [imageThumbnail(record),record.name,record.initial,resolvedStatus(record),
+    resolvedTypes(record).join(", ") || "—",record.reason || "—"]);
+  detail.append(table(["원본","파일명","1차","현재 결과","불량 유형","검토 사유"],results));
+  app.append(container("columns",types,reviews),detail);
+}
+
+byId("cancel-product").onclick = () => byId("product-dialog").close();
+byId("product-form").onsubmit = async event => {
+  event.preventDefault();
+  try {
+    const name = byId("product-name").value.trim();
+    if (!name) throw new Error("제품명을 입력하세요.");
+    if (products.some(product => product.name === name)) throw new Error("이미 등록된 제품명입니다.");
+    const types = parseTypes(byId("product-types").value);
+    byId("product-dialog").close();
+    await perform(async () => {
+      const product = makeProduct(crypto.randomUUID(), name, types);
+      await saveProduct(product);
+      currentId = product.id;
+      currentTab = "학습";
+      selectedRun = null;
+      selectedReview = null;
+      event.target.reset();
+    }, "제품을 등록했습니다.");
+  } catch (error) {
+    byId("product-dialog").close();
+    notify(error.message, true);
+  }
+};
+
+(async () => {
+  try {
+    db = await openDatabase();
+    products = await readProducts();
+    if (!products.length) {
+      await saveProduct(makeProduct("demo-a", "제품 A · 반도체 패키지", SAMPLE_TYPES.chip, "chip"));
+      await saveProduct(makeProduct("demo-b", "제품 B · 자성 부품", SAMPLE_TYPES.tile, "tile"));
+    }
+    render();
+  } catch (error) {
+    notify("브라우저 저장소를 열 수 없습니다. " + error.message, true);
+  }
+})();
+</script>
+</body>
+</html>

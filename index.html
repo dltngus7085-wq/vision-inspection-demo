@@ -26,18 +26,27 @@ small{font-size:13px}
 .page-head,.row{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
 .page-head{margin-bottom:22px}
 .page-head p{margin-top:7px}
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(245px,100%),1fr));gap:18px}
-.card,.panel{background:#fff;border:1px solid var(--line);border-radius:13px;overflow:hidden}
-.panel{padding:22px;margin-bottom:16px}
-.card>button{display:block;width:100%;padding:0;text-align:left;color:inherit;background:white;border:0}
-.card>button:hover{background:#f6fbfc}
-.card img{width:100%;height:155px;object-fit:cover;display:block;background:#253542}
-.card-content{padding:16px}
-.card-content p{margin-top:6px}
+.products{display:grid;gap:8px}
+.product-row,.panel{background:#fff;border:1px solid var(--line);border-radius:13px}
+.product-row{display:flex;min-width:0;align-items:center;gap:8px;padding:4px 10px 4px 4px}
+.product-open{flex:1;min-width:0;text-align:left;background:transparent;border:0;border-radius:8px;color:var(--ink);font-size:18px;font-weight:650;padding:10px 13px;overflow-wrap:anywhere}
+.product-open:hover{background:#edf6f9}
+.product-delete{flex:none}
+.panel{padding:22px;margin-bottom:16px;overflow:hidden}
+.search-field{max-width:460px;margin-bottom:12px}
+.search-field label{margin-top:0}
+.record-filters{display:grid;grid-template-columns:minmax(0,460px) minmax(120px,180px);gap:12px;align-items:end;margin-top:14px}
+.record-filters .search-field{margin-bottom:0}
+.history-controls{margin-top:16px}
+.history-controls .search-field{margin-bottom:0}
+.history-title{margin-top:14px}
 .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btn{border:1px solid var(--line);background:white;color:var(--ink);border-radius:8px;padding:8px 13px;font-weight:600}
 .btn:hover{background:#f2f7fa}
 .primary,.primary:hover{background:var(--accent);border-color:var(--accent);color:white}
+.danger{color:var(--danger)}
+.danger:hover{background:#fbeeea}
+.danger-solid,.danger-solid:hover{background:var(--danger);border-color:var(--danger);color:white}
 .back{margin-bottom:16px}
 .pill{display:inline-block;background:var(--soft);color:#17566c;border-radius:30px;padding:3px 10px;font-size:13px;font-weight:600}
 nav{display:flex;flex-wrap:wrap;gap:5px;border-bottom:1px solid var(--line);margin-bottom:18px}
@@ -45,7 +54,7 @@ nav button{background:none;border:0;border-bottom:3px solid transparent;color:va
 nav button[aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
 .columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 label{display:block;font-weight:600;margin:12px 0 7px}
-input[type=text],textarea,select{width:100%;padding:8px;border:1px solid #b9ccd7;border-radius:7px;background:white;color:var(--ink)}
+input[type=text],input[type=search],textarea,select{width:100%;padding:8px;border:1px solid #b9ccd7;border-radius:7px;background:white;color:var(--ink)}
 textarea{resize:vertical}
 input[type=file]{width:100%;color:var(--ink)}
 .panel p,.panel .actions{margin-top:8px}
@@ -67,9 +76,12 @@ th{color:var(--muted);font-weight:650}
 #notice.error{background:#faece7;color:var(--danger)}
 dialog{max-width:min(94vw,490px);width:100%;border:1px solid var(--line);border-radius:12px;padding:22px;color:var(--ink)}
 dialog::backdrop{background:#10222d99}
+dialog .actions{margin-top:16px}
+dialog p{margin-top:8px;overflow-wrap:anywhere}
+.history-title h3{overflow-wrap:anywhere}
 fieldset{padding:0;border:0;margin:0}
 .checks label{display:inline-flex;gap:7px;align-items:center;margin:7px 12px 7px 0}
-@media(max-width:640px){main{padding:22px 12px}.panel{padding:15px}.columns{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:7px}.bar-row{grid-template-columns:minmax(75px,120px) 1fr auto}}
+@media(max-width:640px){main{padding:22px 12px}.panel{padding:15px}.columns,.record-filters{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:7px}.bar-row{grid-template-columns:minmax(75px,120px) 1fr auto}}
 </style>
 </head>
 <body>
@@ -89,6 +101,17 @@ fieldset{padding:0;border:0;margin:0}
     <div class="actions" style="margin-top:14px">
       <button class="btn primary" type="submit">제품 추가</button>
       <button class="btn" id="cancel-product" type="button">닫기</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="delete-dialog" aria-labelledby="delete-title" aria-describedby="delete-message delete-consequence">
+  <form id="delete-form">
+    <h2 id="delete-title">제품 삭제</h2>
+    <p id="delete-message"></p>
+    <p id="delete-consequence"><small>이 제품의 학습 데이터, 모델과 검사 결과도 함께 삭제됩니다.</small></p>
+    <div class="actions">
+      <button class="btn" id="cancel-delete" type="button" autofocus>취소</button>
+      <button class="btn danger-solid" type="submit">삭제 확인</button>
     </div>
   </form>
 </dialog>
@@ -114,6 +137,9 @@ let currentId = null;
 let currentTab = "학습";
 let selectedRun = null;
 let selectedReview = null;
+let productQuery = "";
+let historyQuery = "";
+let deleteTarget = null;
 let busy = false;
 const objectUrls = [];
 
@@ -155,6 +181,18 @@ function fileInput(label, id) {
   return {input, label:labelElement};
 }
 
+function searchInput(id, label, hint, value = "") {
+  const input = element("input", undefined, {id, type:"search", placeholder:hint});
+  input.value = value;
+  return {input, field:container("search-field", element("label", label, {for:id}), input)};
+}
+
+function matchesQuery(query, ...values) {
+  const words = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const text = values.join(" ").toLocaleLowerCase();
+  return words.every(word => text.includes(word));
+}
+
 function selectInput(id, options, value) {
   const select = element("select", undefined, {id});
   for (const choice of options) {
@@ -168,9 +206,24 @@ function selectInput(id, options, value) {
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open("product-visual-inspection", 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("products", {keyPath:"id"});
-    request.onsuccess = () => resolve(request.result);
+    const request = indexedDB.open("product-visual-inspection", 2);
+    request.onupgradeneeded = event => {
+      const store = event.oldVersion === 0
+        ? request.result.createObjectStore("products", {keyPath:"id"})
+        : request.transaction.objectStore("products");
+      const count = store.count();
+      count.onsuccess = () => {
+        if (count.result) return;
+        const demoA = makeProduct("demo-a", "제품 A · 반도체 패키지", SAMPLE_TYPES.chip, "chip");
+        const demoB = makeProduct("demo-b", "제품 B · 자성 부품", SAMPLE_TYPES.tile, "tile");
+        for (const demo of [demoA,demoB]) store.put({...demo, revision:1});
+      };
+    };
+    request.onblocked = () => notify("다른 탭의 비전 검사 작업대를 닫으면 저장소 업데이트가 이어집니다.", true);
+    request.onsuccess = () => {
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
 }
@@ -183,7 +236,7 @@ function readProducts() {
   });
 }
 
-function storeProduct(product) {
+function storeProduct(product, {remove = false} = {}) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction("products", "readwrite");
     const store = transaction.objectStore("products");
@@ -191,9 +244,12 @@ function storeProduct(product) {
     const lookup = store.get(product.id);
     let conflict = false;
     lookup.onsuccess = () => {
-      if ((lookup.result?.revision || 0) !== (product.revision || 0)) {
+      const current = lookup.result;
+      if ((current?.revision || 0) !== (product.revision || 0) || (remove && !current)) {
         conflict = true;
         transaction.abort();
+      } else if (remove) {
+        store.delete(product.id);
       } else {
         store.put(snapshot);
       }
@@ -250,6 +306,7 @@ function enterProduct(product) {
   currentTab = "학습";
   selectedRun = null;
   selectedReview = null;
+  historyQuery = "";
   notify();
   render();
 }
@@ -268,26 +325,35 @@ function renderHome() {
     element("p", "제품을 선택해 학습 데이터를 등록하고 검사하세요."));
   app.append(container("page-head", heading,
     button("제품 등록", () => byId("product-dialog").showModal(), true)));
-  const grid = container("cards");
-  for (const product of products) {
-    const open = button(product.name, () => enterProduct(product));
-    open.replaceChildren(
-      container("card-content",
-        element("h2", product.name),
-        element("p", ["불량 유형 " + product.types.length + "개", "검사 " + product.runs.length + "회"].join(" · ")),
-        element("span", product.model ? "학습 v" + product.model.version : "학습 전", {class:"pill"})));
-    if (product.sample) {
-      const cover = sampleCanvas(product.sample, 0, 0, true);
-      open.prepend(element("img", undefined, {src:cover.toDataURL(), alt:"", width:"280", height:"155"}));
-    } else if (product.data[0]?.file) {
-      const preview = imageThumbnail(product.data[0]);
-      preview.alt = "";
-      preview.className = "";
-      open.prepend(preview);
+  const search = searchInput("product-search", "제품명 검색", "예: 제품 C", productQuery);
+  const list = container("products");
+  const empty = element("p");
+  function fillProducts() {
+    const matches = products
+      .filter(product => matchesQuery(productQuery, product.name))
+      .sort((a,b) => a.name.localeCompare(b.name, "ko-KR", {numeric:true}));
+    list.replaceChildren();
+    for (const product of matches) {
+      const open = button(product.name, () => enterProduct(product));
+      open.className = "product-open";
+      const remove = button("삭제", () => {
+        deleteTarget = product;
+        byId("delete-message").textContent = "정말로 ‘" + product.name + "’ 제품을 삭제하시겠습니까?";
+        byId("delete-dialog").showModal();
+      });
+      remove.classList.add("danger", "product-delete");
+      remove.setAttribute("aria-label", product.name + " 삭제");
+      list.append(container("product-row", open, remove));
     }
-    grid.append(container("card", open));
+    empty.hidden = matches.length > 0;
+    empty.textContent = products.length ? "검색 결과가 없습니다." : "등록된 제품이 없습니다.";
   }
-  app.append(grid);
+  search.input.oninput = () => {
+    productQuery = search.input.value;
+    fillProducts();
+  };
+  app.append(search.field, list, empty);
+  fillProducts();
 }
 
 function setTab(tab) {
@@ -327,10 +393,10 @@ function drawNoise(ctx, width, height, seed) {
   ctx.putImageData(bitmap, 0, 0);
 }
 
-function sampleCanvas(kind, typeIndex, seed, cover = false) {
+function sampleCanvas(kind, typeIndex, seed) {
   const canvas = element("canvas");
   canvas.width = 280;
-  canvas.height = cover ? 155 : 210;
+  canvas.height = 210;
   const ctx = canvas.getContext("2d");
   const middle = canvas.height / 2;
   const shift = seed % 5 - 2;
@@ -559,7 +625,7 @@ function table(headers, rows) {
   return container("table-wrap", item);
 }
 
-async function runInspection(product, files, source) {
+async function runInspection(product, files, source, name) {
   if (!product.model) throw new Error("학습 탭에서 제품 모델을 먼저 학습하세요.");
   if (!files.length) throw new Error("검사할 이미지를 선택하세요.");
   const records = [];
@@ -568,11 +634,12 @@ async function runInspection(product, files, source) {
   }
   const run = {
     id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
-    types:product.model.types, source, records,
+    types:product.model.types, source, name:name.trim(), records,
   };
   await saveProduct({...product, runs:[run, ...product.runs]});
   selectedRun = run.id;
   selectedReview = null;
+  historyQuery = "";
   currentTab = "결과 분석";
 }
 
@@ -580,9 +647,13 @@ function renderInspection(product) {
   const section = panel("검사 이미지 업로드");
   section.append(element("p", product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다." : "검사를 시작하려면 제품을 학습하세요."));
   const files = fileInput("검사할 이미지", "inspection-files");
-  section.append(files.label, files.input);
+  const name = element("input", undefined, {
+    type:"text", id:"inspection-name", maxlength:"80", placeholder:"예: 제품 C · 1차 평가",
+  });
+  section.append(element("label", "검사 결과 이름 (선택)", {for:"inspection-name"}), name, files.label, files.input);
   const actions = container("actions");
-  const run = button("검사 실행", () => perform(() => runInspection(product, [...files.input.files], "업로드"), "검사를 완료했습니다."), true);
+  const run = button("검사 실행", () => perform(() =>
+    runInspection(product, [...files.input.files], "업로드", name.value), "검사 결과를 저장했습니다."), true);
   run.disabled = !product.model;
   actions.append(run);
   if (product.sample) {
@@ -592,7 +663,7 @@ function renderInspection(product) {
         images.push(await demoFile(product.sample, index, 23, "검사-" + (index + 1) + ".png"));
       }
       images.push(await demoFile(product.sample, -1, 27, "검사-추가사례.png"));
-      await runInspection(product, images, "합성 시연");
+      await runInspection(product, images, "합성 시연", name.value);
     }, "합성 시연 이미지 검사를 완료했습니다."));
     demo.disabled = !product.model;
     actions.append(demo);
@@ -605,14 +676,70 @@ function history(product) {
   return product.runs.find(run => run.id === selectedRun) || product.runs[0];
 }
 
+function runDate(run) {
+  return new Date(run.date).toLocaleString("ko-KR");
+}
+
+function runName(run) {
+  return run.name || "검사 " + runDate(run);
+}
+
 function renderHistoryPicker(product, host, run) {
-  const options = product.runs.map(item => ({
-    value:item.id,
-    label:new Date(item.date).toLocaleString("ko-KR") + " · v" + item.version + " · " + item.source + " · " + item.records.length + "장",
-  }));
-  const select = selectInput("runs", options, run.id);
+  const search = searchInput("run-search", "검사 이력 검색", "결과 이름, 날짜, 모델 버전으로 검색", historyQuery);
+  const select = selectInput("runs", [], run.id);
+  const count = element("small", undefined, {"aria-live":"polite"});
+  function fillHistory() {
+    const matching = product.runs.filter(item =>
+      matchesQuery(historyQuery, runName(item), runDate(item), item.date.slice(0,10), "v" + item.version, item.source));
+    const containsSelection = matching.some(item => item.id === run.id);
+    select.replaceChildren();
+    if (!containsSelection) {
+      select.add(new Option(matching.length ? "검색 결과에서 검사 선택" : "검색 결과 없음", "", true, true));
+      select.options[0].disabled = true;
+    }
+    for (const item of matching) {
+      const date = item.name ? " · " + runDate(item) : "";
+      const label = runName(item) + date + " · v" + item.version + " · " + item.source + " · " + item.records.length + "장";
+      select.add(new Option(label, item.id));
+    }
+    select.disabled = !matching.length;
+    if (containsSelection) select.value = run.id;
+    count.textContent = matching.length + "개 / 전체 이력 " + product.runs.length + "개";
+  }
+  search.input.oninput = () => {
+    historyQuery = search.input.value;
+    fillHistory();
+  };
   select.onchange = () => { selectedRun = select.value; selectedReview = null; render(); };
-  host.append(element("label", "검사 이력", {for:"runs"}), select);
+  fillHistory();
+  host.append(container("history-controls", search.field,
+    element("label", "검사 이력", {for:"runs"}), select, count));
+}
+
+function renderRunTitle(product, section, run) {
+  const title = element("h3", runName(run));
+  const edit = button("이름 변경", () => {
+    editor.hidden = false;
+    name.focus();
+    name.select();
+  });
+  const editor = element("form", undefined, {hidden:""});
+  const name = element("input", undefined, {type:"text", id:"run-name", required:"", maxlength:"80"});
+  name.value = runName(run);
+  const cancel = button("취소", () => { editor.hidden = true; name.value = runName(run); edit.focus(); });
+  const save = element("button", "이름 저장", {type:"submit", class:"btn primary"});
+  editor.append(element("label", "결과 이름", {for:"run-name"}), name, container("actions", save, cancel));
+  editor.onsubmit = event => {
+    event.preventDefault();
+    perform(async () => {
+      const newName = name.value.trim();
+      if (!newName) throw new Error("결과 이름을 입력하세요.");
+      const runs = product.runs.map(item => item.id === run.id ? {...item, name:newName} : item);
+      await saveProduct({...product, runs});
+      historyQuery = "";
+    }, "결과 이름을 저장했습니다.");
+  };
+  section.append(container("row history-title", title, edit), editor);
 }
 
 function imageThumbnail(record, className = "thumb") {
@@ -683,6 +810,7 @@ function renderAnalysis(product) {
   const run = history(product);
   if (!run) { section.append(element("p", "검사를 실행하면 제품별 결과와 리뷰 현황을 확인할 수 있습니다.")); return; }
   renderHistoryPicker(product, section, run);
+  renderRunTitle(product, section, run);
   const size = run.records.length;
   const statuses = [NORMAL,DEFECT,REVIEW];
   const counts = statuses.map(status => run.records.filter(record => resolvedStatus(record) === status).length);
@@ -699,11 +827,52 @@ function renderAnalysis(product) {
     return [reason,matches.length,...[REVIEW,NORMAL,DEFECT].map(status => matches.filter(record => resolvedStatus(record) === status).length)];
   })));
   const detail = panel("이미지별 판정");
-  const results = run.records.map(record => [imageThumbnail(record),record.name,record.initial,resolvedStatus(record),
-    resolvedTypes(record).join(", ") || "—",record.reason || "—"]);
-  detail.append(table(["원본","파일명","1차","현재 결과","불량 유형","검토 사유"],results));
+  renderRecordSearch(detail, run.records);
   app.append(container("columns",types,reviews),detail);
 }
+
+function renderRecordSearch(detail, records) {
+  const search = searchInput("record-search", "판정 결과 검색", "파일명, 불량 유형, 검토 사유로 검색");
+  const statusFilter = selectInput("record-status", [
+    {label:"전체", value:""}, NORMAL, DEFECT, REVIEW,
+  ]);
+  const count = element("p", undefined, {"aria-live":"polite"});
+  const results = records.map(record => [imageThumbnail(record),record.name,record.initial,resolvedStatus(record),
+    resolvedTypes(record).join(", ") || "—",record.reason || "—"]);
+  const list = table(["원본","파일명","1차","현재 결과","불량 유형","검토 사유"],results);
+  const rows = [...list.querySelectorAll("tbody tr")];
+  function filterRows() {
+    let visible = 0;
+    rows.forEach((row,index) => {
+      const record = records[index];
+      const status = resolvedStatus(record);
+      const matchesStatus = !statusFilter.value || statusFilter.value === status;
+      const matchesText = matchesQuery(search.input.value, record.name, record.initial, status, ...resolvedTypes(record), record.reason);
+      row.hidden = !matchesStatus || !matchesText;
+      if (!row.hidden) visible++;
+    });
+    count.textContent = visible ? visible + "장 / 전체 " + rows.length + "장" : "검색 결과가 없습니다.";
+    list.hidden = !visible;
+  }
+  search.input.oninput = filterRows;
+  statusFilter.onchange = filterRows;
+  detail.append(container("record-filters", search.field,
+    container("", element("label", "판정 상태", {for:"record-status"}), statusFilter)), count, list);
+  filterRows();
+}
+
+byId("cancel-delete").onclick = () => byId("delete-dialog").close();
+byId("delete-form").onsubmit = event => {
+  event.preventDefault();
+  const product = deleteTarget;
+  byId("delete-dialog").close();
+  if (!product) return;
+  perform(async () => {
+    await storeProduct(product, {remove:true});
+    products = products.filter(item => item.id !== product.id);
+  }, "‘" + product.name + "’ 제품을 삭제했습니다.");
+};
+byId("delete-dialog").onclose = () => { deleteTarget = null; };
 
 byId("cancel-product").onclick = () => byId("product-dialog").close();
 byId("product-form").onsubmit = async event => {
@@ -721,6 +890,8 @@ byId("product-form").onsubmit = async event => {
       currentTab = "학습";
       selectedRun = null;
       selectedReview = null;
+      historyQuery = "";
+      productQuery = "";
       event.target.reset();
     }, "제품을 등록했습니다.");
   } catch (error) {
@@ -733,11 +904,8 @@ byId("product-form").onsubmit = async event => {
   try {
     db = await openDatabase();
     products = await readProducts();
-    if (!products.length) {
-      await saveProduct(makeProduct("demo-a", "제품 A · 반도체 패키지", SAMPLE_TYPES.chip, "chip"));
-      await saveProduct(makeProduct("demo-b", "제품 B · 자성 부품", SAMPLE_TYPES.tile, "tile"));
-    }
     render();
+    notify();
   } catch (error) {
     notify("브라우저 저장소를 열 수 없습니다. " + error.message, true);
   }

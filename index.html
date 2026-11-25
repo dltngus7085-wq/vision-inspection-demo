@@ -37,6 +37,7 @@ small{font-size:13px}
 .search-field label{margin-top:0}
 .record-filters{display:grid;grid-template-columns:minmax(0,460px) minmax(120px,180px);gap:12px;align-items:end;margin-top:14px}
 .record-filters .search-field{margin-bottom:0}
+.training-folders{margin-top:16px}
 .history-controls{margin-top:16px}
 .history-controls .search-field{margin-bottom:0}
 .history-title{margin-top:14px}
@@ -120,6 +121,16 @@ fieldset{padding:0;border:0;margin:0}
     </div>
   </form>
 </dialog>
+<dialog id="training-change-dialog" aria-labelledby="training-change-title" aria-describedby="training-change-message">
+  <form id="training-change-form">
+    <h2 id="training-change-title"></h2>
+    <p id="training-change-message"></p>
+    <div class="actions">
+      <button class="btn" id="cancel-training-change" type="button" autofocus>취소</button>
+      <button class="btn danger-solid" type="submit">삭제 확인</button>
+    </div>
+  </form>
+</dialog>
 <script>
 "use strict";
 
@@ -129,10 +140,10 @@ const REVIEW = "검토 대기";
 const CHECK_NORMAL = "정상 재검사 불일치";
 const CHECK_TYPE = "불량 유형 미확정";
 const REVIEW_REASONS = [CHECK_NORMAL, CHECK_TYPE];
-const SAMPLE_TYPES = {
-  chip: ["모서리 파손", "오염"],
-  tile: ["균열", "기공", "표면 얼룩"],
-};
+const DEFAULT_PRODUCTS = [
+  {id:"demo-a", name:"제품 A · 반도체 패키지", types:["모서리 파손", "오염"]},
+  {id:"demo-b", name:"제품 B · 자성 부품", types:["균열", "기공", "표면 얼룩"]},
+];
 const TABS = ["학습", "검사", "관리자 검토", "결과 분석"];
 const byId = id => document.getElementById(id);
 const app = byId("view");
@@ -145,6 +156,7 @@ let selectedReview = null;
 let productQuery = "";
 let historyQuery = "";
 let deleteTarget = null;
+let pendingTrainingChange = null;
 let busy = false;
 const objectUrls = [];
 
@@ -189,17 +201,18 @@ function supportedImage(file) {
     || /^image\/(png|jpeg|webp|bmp)$/i.test(file.type);
 }
 
-function imagePicker(id) {
+function imagePicker(id, {folderOnly = false} = {}) {
   const files = element("input", undefined, {
     id:id + "-files", type:"file", accept:"image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp", multiple:"",
   });
-  const fields = container("image-choices",
-    container("", element("label", "이미지 파일 선택", {for:files.id}), files));
+  const fields = container("image-choices");
+  if (!folderOnly) fields.append(container("", element("label", "이미지 파일 선택", {for:files.id}), files));
   const folder = "webkitdirectory" in files
     ? element("input", undefined, {id:id + "-folder", type:"file", webkitdirectory:"", multiple:""})
     : null;
   const status = element("p", undefined, {class:"image-selection", role:"status", hidden:""});
   if (folder) fields.append(container("", element("label", "이미지 폴더 선택", {for:folder.id}), folder));
+  else if (folderOnly) fields.append(element("p", "폴더 선택을 지원하는 브라우저에서 열어 주세요."));
 
   function selection() {
     return [...(folder?.files.length ? folder.files : files.files)];
@@ -224,7 +237,7 @@ function imagePicker(id) {
 
   return {fields, status, images() {
     const all = selection();
-    if (!all.length) throw new Error("이미지 파일이나 폴더를 선택하세요.");
+    if (!all.length) throw new Error(folderOnly ? "학습 이미지 폴더를 선택하세요." : "이미지 파일이나 폴더를 선택하세요.");
     const images = all.filter(supportedImage);
     if (!images.length) throw new Error("선택한 항목에 PNG, JPG, WEBP, BMP 이미지가 없습니다.");
     return images;
@@ -264,9 +277,9 @@ function openDatabase() {
       const count = store.count();
       count.onsuccess = () => {
         if (count.result) return;
-        const demoA = makeProduct("demo-a", "제품 A · 반도체 패키지", SAMPLE_TYPES.chip, "chip");
-        const demoB = makeProduct("demo-b", "제품 B · 자성 부품", SAMPLE_TYPES.tile, "tile");
-        for (const demo of [demoA,demoB]) store.put({...demo, revision:1});
+        for (const {id,name,types} of DEFAULT_PRODUCTS) {
+          store.put({...makeProduct(id, name, types), revision:1});
+        }
       };
     };
     request.onblocked = () => notify("다른 탭의 비전 검사 작업대를 닫으면 저장소 업데이트가 이어집니다.", true);
@@ -339,8 +352,8 @@ async function perform(work, success) {
   }
 }
 
-function makeProduct(id, name, types, sample = null) {
-  return {id, name, types, sample, data:[], model:null, runs:[]};
+function makeProduct(id, name, types) {
+  return {id, name, types, data:[], model:null, runs:[]};
 }
 
 function parseTypes(value) {
@@ -417,7 +430,8 @@ function renderProduct(product) {
   back.classList.add("back");
   app.append(back, container("page-head",
     container("", element("h1", product.name), element("p", product.types.length ? product.types.join(" · ") : "불량 유형을 등록하세요.")),
-    element("span", product.model ? "사용 중인 모델 v" + product.model.version : "학습 전", {class:"pill"})));
+    element("span", product.requiresRetraining ? "재학습 필요"
+      : product.model ? "사용 중인 모델 v" + product.model.version : "학습 전", {class:"pill"})));
   const nav = element("nav", undefined, {"aria-label":"제품 메뉴"});
   for (const tab of TABS) {
     const item = button(tab, () => setTab(tab));
@@ -430,100 +444,6 @@ function renderProduct(product) {
   app.append(nav);
   const renderTab = {"학습":renderTraining, "검사":renderInspection, "관리자 검토":renderReview, "결과 분석":renderAnalysis};
   renderTab[currentTab](product);
-}
-
-function drawNoise(ctx, width, height, seed) {
-  let state = seed + 109;
-  const bitmap = ctx.getImageData(0, 0, width, height);
-  for (let offset = 0; offset < bitmap.data.length; offset += 4) {
-    state = (Math.imul(1664525, state) + 1013904223) >>> 0;
-    const noise = (state % 17) - 8;
-    for (let channel = 0; channel < 3; channel++) bitmap.data[offset + channel] += noise;
-  }
-  ctx.putImageData(bitmap, 0, 0);
-}
-
-function sampleCanvas(kind, typeIndex, seed) {
-  const canvas = element("canvas");
-  canvas.width = 280;
-  canvas.height = 210;
-  const ctx = canvas.getContext("2d");
-  const middle = canvas.height / 2;
-  const shift = seed % 5 - 2;
-  const backdrop = ctx.createLinearGradient(0, 0, 280, canvas.height);
-  backdrop.addColorStop(0, "#374a56");
-  backdrop.addColorStop(1, "#172832");
-  ctx.fillStyle = backdrop;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  if (kind === "tile") {
-    ctx.fillStyle = "#aeae9d";
-    ctx.beginPath();
-    ctx.ellipse(140, middle, 99, 56, -.12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "#565b5b";
-    ctx.lineWidth = 13;
-    ctx.stroke();
-    if (typeIndex === 1) {
-      ctx.strokeStyle = "#372c25";
-      ctx.lineWidth = 9;
-      ctx.beginPath();
-      ctx.moveTo(105 + shift, middle - 42);
-      ctx.lineTo(145, middle + 7);
-      ctx.lineTo(125, middle + 45);
-      ctx.stroke();
-    } else if (typeIndex === 2) {
-      ctx.fillStyle = "#48463f";
-      for (const [x,y] of [[105,-10],[150,8],[166,-12],[128,21]]) {
-        ctx.beginPath();
-        ctx.arc(x + shift, middle + y, 11, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (typeIndex === 3) {
-      ctx.fillStyle = "#8d472b";
-      ctx.beginPath();
-      ctx.ellipse(159 + shift, middle + 6, 40, 27, .3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  } else {
-    ctx.fillStyle = "#b9a674";
-    for (let index = 0; index < 9; index++) {
-      ctx.fillRect(61, middle - 46 + index * 11, 20, 5);
-      ctx.fillRect(199, middle - 46 + index * 11, 20, 5);
-    }
-    ctx.fillStyle = "#607784";
-    ctx.fillRect(77, middle - 57, 126, 114);
-    ctx.fillStyle = "#293840";
-    ctx.fillRect(90, middle - 44, 100, 88);
-    ctx.fillStyle = "#94a9b0";
-    ctx.font = "11px monospace";
-    ctx.fillText("PKG 240", 116, middle + 4);
-    if (typeIndex === 1) {
-      ctx.fillStyle = "#b6c3c0";
-      ctx.beginPath();
-      ctx.moveTo(78, middle - 57);
-      ctx.lineTo(138 + shift, middle - 57);
-      ctx.lineTo(78, middle + 3);
-      ctx.fill();
-    } else if (typeIndex === 2) {
-      ctx.fillStyle = "#a8603e";
-      ctx.beginPath();
-      ctx.ellipse(164 + shift, middle + 17, 29, 24, .35, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  if (typeIndex === -1) {
-    ctx.fillStyle = "#5d21b2";
-    ctx.fillRect(41, middle - 17, 198, 34);
-    ctx.fillStyle = "#eda247";
-    ctx.fillRect(109, middle - 42, 66, 87);
-  }
-  drawNoise(ctx, canvas.width, canvas.height, seed);
-  return canvas;
-}
-
-async function demoFile(kind, typeIndex, seed, name) {
-  const blob = await new Promise(resolve => sampleCanvas(kind, typeIndex, seed).toBlob(resolve, "image/png"));
-  return new File([blob], name, {type:"image/png"});
 }
 
 async function imageFeatures(file) {
@@ -573,10 +493,22 @@ function closest(feature, groups, key) {
   })).sort((a, b) => a.distance - b.distance);
 }
 
-async function labeledFiles(files, label) {
+async function labeledFolder(files, label) {
+  const folder = {
+    id:crypto.randomUUID(),
+    name:files[0].webkitRelativePath.split("/")[0],
+    createdAt:new Date().toISOString(),
+  };
   const entries = [];
-  for (const file of files) entries.push({label, name:imageName(file), file, features:await imageFeatures(file)});
+  for (const file of files) {
+    entries.push({label, folder, name:imageName(file), file, features:await imageFeatures(file)});
+  }
   return entries;
+}
+
+function lastModelVersion(product) {
+  const current = Math.max(product.lastModelVersion || 0, product.model?.version || 0);
+  return product.runs.reduce((latest, run) => Math.max(latest, run.version), current);
 }
 
 function buildModel(product) {
@@ -587,7 +519,7 @@ function buildModel(product) {
   const missing = groups.filter(group => !group.samples.length).map(group => group.label);
   if (missing.length) throw new Error("학습 이미지가 필요한 항목 · " + missing.join(", "));
   return {
-    version:(product.model?.version || 0) + 1,
+    version:lastModelVersion(product) + 1,
     createdAt:new Date().toISOString(),
     types:[...product.types],
     trainingCount:groups.reduce((count, group) => count + group.samples.length, 0),
@@ -623,38 +555,127 @@ function renderTraining(product) {
 
   const data = panel("학습 이미지 등록");
   const label = selectInput("training-label", [NORMAL, ...product.types]);
-  const picker = imagePicker("training");
-  data.append(element("p", "정답 유형을 고르고 해당 유형의 파일 또는 폴더를 추가하세요. 폴더 안의 이미지는 선택한 유형으로 등록됩니다."),
+  const picker = imagePicker("training", {folderOnly:true});
+  data.append(element("p", "정답 유형을 고르고 해당 폴더를 추가하세요. 폴더 안의 이미지는 선택한 유형으로 등록됩니다."),
     element("label", "정답 유형", {for:"training-label"}), label, picker.fields, picker.status,
     container("actions", button("학습 데이터에 추가", () => perform(async () => {
-      const entries = await labeledFiles(picker.images(), label.value);
+      const entries = await labeledFolder(picker.images(), label.value);
       await saveProduct({...product, data:[...product.data, ...entries]});
     }, "선택한 제품의 학습 데이터에 추가했습니다."))));
   const distribution = [NORMAL, ...product.types].map(type => [type, product.data.filter(item => item.label === type).length + "장"]);
   data.append(table(["정답 유형","등록 이미지"], distribution));
 
   const train = panel("모델 학습");
-  train.append(element("p", product.model
-    ? "현재 검사에 적용 중인 버전 v" + product.model.version + " · " + product.model.types.join(", ") + (product.model.trainingCount ? " · 학습 이미지 " + product.model.trainingCount + "장" : "")
-    : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다."));
-  const actions = container("actions", button(product.model ? "추가 학습 실행" : "학습 실행", () => perform(async () => {
-    await saveProduct({...product, model:buildModel(product)});
+  const modelStatus = product.requiresRetraining
+    ? "학습에 사용한 이미지가 삭제되었습니다. 남은 데이터로 다시 학습하면 검사를 시작할 수 있습니다."
+    : product.model
+      ? "현재 검사에 적용 중인 버전 v" + product.model.version + " · " + product.model.types.join(", ")
+        + (product.model.trainingCount ? " · 학습 이미지 " + product.model.trainingCount + "장" : "")
+      : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다.";
+  train.append(element("p", modelStatus));
+  const trainLabel = product.requiresRetraining ? "다시 학습" : product.model ? "추가 학습 실행" : "학습 실행";
+  const actions = container("actions", button(trainLabel, () => perform(async () => {
+    const model = buildModel(product);
+    await saveProduct({...product, model, lastModelVersion:model.version, requiresRetraining:false});
   }, "이 제품의 학습을 완료했습니다."), true));
-  if (product.sample) actions.append(button("시연 데이터 추가", () => perform(async () => {
-    const dataEntries = [];
-    for (const [index, type] of [NORMAL, ...SAMPLE_TYPES[product.sample]].entries()) {
-      if (type !== NORMAL && !product.types.includes(type)) continue;
-      for (const seed of [3, 8, 14]) {
-        const file = await demoFile(product.sample, index, seed, "학습-" + index + "-" + seed + ".png");
-        dataEntries.push(...await labeledFiles([file], type));
-      }
+  if (product.model) {
+    const reset = button("학습 모델 삭제", () => confirmTrainingChange(
+      "학습 모델 삭제",
+      "현재 모델 v" + product.model.version + "을 삭제하시겠습니까? 등록한 이미지와 이전 검사 결과는 계속 조회할 수 있습니다.",
+      async () => {
+        await saveProduct({...product, model:null, lastModelVersion:lastModelVersion(product), requiresRetraining:false});
+      },
+      "학습 모델을 삭제했습니다."));
+    reset.classList.add("danger");
+    actions.append(reset);
+  }
+  train.append(actions, element("p", "현재 모델은 등록한 이미지의 색상과 질감 특징을 비교합니다.", {class:"note"}));
+  app.append(container("columns", setup, data), renderTrainingFolders(product), train);
+}
+
+function confirmTrainingChange(title, message, work, success) {
+  pendingTrainingChange = {work, success};
+  byId("training-change-title").textContent = title;
+  byId("training-change-message").textContent = message;
+  byId("training-change-dialog").showModal();
+}
+
+function trainingFolders(product) {
+  const folders = new Map();
+  const defaultTypes = DEFAULT_PRODUCTS.find(item => item.id === product.id)?.types || [];
+  const oldSampleTypes = product.sample ? [NORMAL, ...defaultTypes] : [];
+  for (const record of product.data) {
+    const root = record.name.includes("/") ? record.name.split("/")[0] : "";
+    const legacySample = record.name.match(/^학습-(\d+)-(?:3|8|14)\.png$/);
+    const isSample = legacySample && oldSampleTypes[Number(legacySample[1])] === record.label;
+    let key;
+    let name;
+    let createdAt;
+    if (record.folder) {
+      ({name,createdAt} = record.folder);
+      key = record.folder.id;
+    } else if (isSample) {
+      name = "기존 시연 데이터";
+      key = "legacy-demo";
+    } else {
+      name = root || "이전에 개별 등록한 이미지";
+      key = JSON.stringify([root, record.label]);
     }
-    const existing = new Set(product.data.map(entry => JSON.stringify([entry.label, entry.name])));
-    await saveProduct({...product, data:[...product.data, ...dataEntries.filter(entry => !existing.has(JSON.stringify([entry.label, entry.name])))]});
-  }, "합성 시연 이미지를 학습 데이터에 등록했습니다.")));
-  if (product.sample && !product.model) train.append(element("p", "시연 데이터 추가 후 학습 실행을 누르세요."));
-  train.append(actions, element("p", "데모 모델은 브라우저에서 학습 이미지의 색상과 질감 특징을 비교합니다.", {class:"note"}));
-  app.append(container("columns", setup, data), train);
+    if (!folders.has(key)) folders.set(key, {name,createdAt,records:[],labels:new Set()});
+    const group = folders.get(key);
+    group.records.push(record);
+    group.labels.add(record.label);
+  }
+  return [...folders.values()];
+}
+
+function renderTrainingFolders(product) {
+  const section = panel("학습 폴더 관리");
+  const folders = trainingFolders(product);
+  if (!folders.length) {
+    section.append(element("p", "등록한 학습 폴더가 여기에 표시됩니다."));
+    return section;
+  }
+
+  const search = searchInput("training-folder-search", "학습 폴더 검색", "폴더명 또는 정답 유형");
+  const list = container("training-folders");
+  function renderFolders() {
+    const matching = folders.filter(folder => matchesQuery(search.input.value, folder.name, ...folder.labels));
+    list.replaceChildren();
+    if (!matching.length) {
+      list.append(element("p", "검색 결과가 없습니다."));
+      return;
+    }
+    const rows = matching.map(folder => {
+      const remove = button("삭제", () => {
+        const images = new Set(folder.records);
+        // IndexedDB preserves the shared feature references in a saved product.
+        const modelSamples = new Set(product.model?.groups.flatMap(group => group.samples));
+        const usedInModel = folder.records.some(record => modelSamples.has(record.features));
+        const message = "‘" + folder.name + "’의 학습 이미지 " + folder.records.length + "장을 삭제하시겠습니까?"
+          + (usedInModel ? " 삭제 후에는 다시 학습해야 검사를 시작할 수 있습니다." : "");
+        confirmTrainingChange("학습 폴더 삭제", message, async () => {
+          const data = product.data.filter(record => !images.has(record));
+          await saveProduct({...product, data, requiresRetraining:product.requiresRetraining || usedInModel});
+        }, "학습 폴더의 이미지를 삭제했습니다.");
+      });
+      remove.classList.add("danger");
+      remove.setAttribute("aria-label", folder.name + " · " + [...folder.labels].join(", ") + " 삭제");
+      return [
+        folder.name,
+        [...folder.labels].join(", "),
+        folder.records.length + "장",
+        folder.createdAt ? new Date(folder.createdAt).toLocaleString("ko-KR") : "—",
+        remove,
+      ];
+    });
+    list.append(table(["폴더","정답 유형","이미지","등록 시각","관리"],rows));
+  }
+
+  search.input.oninput = renderFolders;
+  section.append(search.field,list);
+  renderFolders();
+  return section;
 }
 
 function table(headers, rows) {
@@ -674,6 +695,7 @@ function table(headers, rows) {
 }
 
 async function runInspection(product, files, source, name) {
+  if (product.requiresRetraining) throw new Error("학습 이미지를 삭제한 모델입니다. 학습 탭에서 다시 학습하세요.");
   if (!product.model) throw new Error("학습 탭에서 제품 모델을 먼저 학습하세요.");
   if (!files.length) throw new Error("검사할 이미지를 선택하세요.");
   const records = [];
@@ -693,7 +715,9 @@ async function runInspection(product, files, source, name) {
 
 function renderInspection(product) {
   const section = panel("검사 이미지 업로드");
-  section.append(element("p", product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다." : "검사를 시작하려면 제품을 학습하세요."));
+  section.append(element("p", product.requiresRetraining ? "학습에 사용한 이미지가 삭제되어 재학습이 필요합니다."
+    : product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다."
+      : "검사를 시작하려면 제품을 학습하세요."));
   const picker = imagePicker("inspection");
   const name = element("input", undefined, {
     type:"text", id:"inspection-name", maxlength:"80", placeholder:"예: 제품 C · 1차 평가",
@@ -702,20 +726,8 @@ function renderInspection(product) {
   const actions = container("actions");
   const run = button("검사 실행", () => perform(() =>
     runInspection(product, picker.images(), "업로드", name.value), "검사 결과를 저장했습니다."), true);
-  run.disabled = !product.model;
+  run.disabled = !product.model || product.requiresRetraining;
   actions.append(run);
-  if (product.sample) {
-    const demo = button("시연 이미지 검사", () => perform(async () => {
-      const images = [];
-      for (const [index] of [NORMAL, ...SAMPLE_TYPES[product.sample]].entries()) {
-        images.push(await demoFile(product.sample, index, 23, "검사-" + (index + 1) + ".png"));
-      }
-      images.push(await demoFile(product.sample, -1, 27, "검사-추가사례.png"));
-      await runInspection(product, images, "합성 시연", name.value);
-    }, "합성 시연 이미지 검사를 완료했습니다."));
-    demo.disabled = !product.model;
-    actions.append(demo);
-  }
   section.append(actions);
   app.append(section);
 }
@@ -921,6 +933,15 @@ byId("delete-form").onsubmit = event => {
   }, "‘" + product.name + "’ 제품을 삭제했습니다.");
 };
 byId("delete-dialog").onclose = () => { deleteTarget = null; };
+
+byId("cancel-training-change").onclick = () => byId("training-change-dialog").close();
+byId("training-change-form").onsubmit = event => {
+  event.preventDefault();
+  const change = pendingTrainingChange;
+  byId("training-change-dialog").close();
+  if (change) perform(change.work, change.success);
+};
+byId("training-change-dialog").onclose = () => { pendingTrainingChange = null; };
 
 byId("cancel-product").onclick = () => byId("product-dialog").close();
 byId("product-form").onsubmit = async event => {

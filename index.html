@@ -57,6 +57,11 @@ label{display:block;font-weight:600;margin:12px 0 7px}
 input[type=text],input[type=search],textarea,select{width:100%;padding:8px;border:1px solid #b9ccd7;border-radius:7px;background:white;color:var(--ink)}
 textarea{resize:vertical}
 input[type=file]{width:100%;color:var(--ink)}
+.image-choices{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(210px,100%),1fr));gap:0 14px}
+.image-choices>div{min-width:0}
+.image-choices input::file-selector-button{border:1px solid var(--line);border-radius:7px;background:#f5f8fa;color:var(--ink);padding:5px 9px;margin-right:7px;cursor:pointer}
+.image-selection{overflow-wrap:anywhere}
+.table-wrap td,.panel h2{overflow-wrap:anywhere}
 .panel p,.panel .actions{margin-top:8px}
 .note{padding:9px 12px;background:#ebf4f8;border-radius:7px}
 .steps{padding-left:22px;color:var(--muted)}
@@ -175,10 +180,55 @@ function notify(message = "", error = false) {
   notice.className = error ? "error" : "";
 }
 
-function fileInput(label, id) {
-  const input = element("input", undefined, {id, type:"file", accept:"image/png,image/jpeg,image/webp,image/bmp", multiple:""});
-  const labelElement = element("label", label, {for:id});
-  return {input, label:labelElement};
+function imageName(file) {
+  return file.webkitRelativePath || file.name;
+}
+
+function supportedImage(file) {
+  return /\.(png|jpe?g|webp|bmp)$/i.test(file.name)
+    || /^image\/(png|jpeg|webp|bmp)$/i.test(file.type);
+}
+
+function imagePicker(id) {
+  const files = element("input", undefined, {
+    id:id + "-files", type:"file", accept:"image/png,image/jpeg,image/webp,image/bmp,.png,.jpg,.jpeg,.webp,.bmp", multiple:"",
+  });
+  const fields = container("image-choices",
+    container("", element("label", "이미지 파일 선택", {for:files.id}), files));
+  const folder = "webkitdirectory" in files
+    ? element("input", undefined, {id:id + "-folder", type:"file", webkitdirectory:"", multiple:""})
+    : null;
+  const status = element("p", undefined, {class:"image-selection", role:"status", hidden:""});
+  if (folder) fields.append(container("", element("label", "이미지 폴더 선택", {for:folder.id}), folder));
+
+  function selection() {
+    return [...(folder?.files.length ? folder.files : files.files)];
+  }
+
+  function update() {
+    const all = selection();
+    const images = all.filter(supportedImage).length;
+    const skipped = all.length - images;
+    status.hidden = !all.length;
+    status.textContent = "이미지 " + images + "장 선택" + (skipped ? " · 지원하지 않는 파일 " + skipped + "개 제외" : "");
+  }
+
+  files.onchange = () => {
+    if (folder) folder.value = "";
+    update();
+  };
+  if (folder) folder.onchange = () => {
+    files.value = "";
+    update();
+  };
+
+  return {fields, status, images() {
+    const all = selection();
+    if (!all.length) throw new Error("이미지 파일이나 폴더를 선택하세요.");
+    const images = all.filter(supportedImage);
+    if (!images.length) throw new Error("선택한 항목에 PNG, JPG, WEBP, BMP 이미지가 없습니다.");
+    return images;
+  }};
 }
 
 function searchInput(id, label, hint, value = "") {
@@ -479,7 +529,7 @@ async function demoFile(kind, typeIndex, seed, name) {
 async function imageFeatures(file) {
   let bitmap;
   try { bitmap = await createImageBitmap(file); }
-  catch { throw new Error(file.name + " 이미지를 읽을 수 없습니다."); }
+  catch { throw new Error(imageName(file) + " 이미지를 읽을 수 없습니다."); }
   const canvas = element("canvas");
   canvas.width = canvas.height = 32;
   const ctx = canvas.getContext("2d", {willReadFrequently:true});
@@ -525,7 +575,7 @@ function closest(feature, groups, key) {
 
 async function labeledFiles(files, label) {
   const entries = [];
-  for (const file of files) entries.push({label, name:file.name, file, features:await imageFeatures(file)});
+  for (const file of files) entries.push({label, name:imageName(file), file, features:await imageFeatures(file)});
   return entries;
 }
 
@@ -573,13 +623,11 @@ function renderTraining(product) {
 
   const data = panel("학습 이미지 등록");
   const label = selectInput("training-label", [NORMAL, ...product.types]);
-  const files = fileInput("해당 유형의 이미지", "training-files");
-  data.append(element("p", "정상과 각 불량 유형의 이미지를 추가하세요. 추가 학습에도 이 화면을 사용합니다."),
-    element("label", "정답 유형", {for:"training-label"}), label, files.label, files.input,
+  const picker = imagePicker("training");
+  data.append(element("p", "정답 유형을 고르고 해당 유형의 파일 또는 폴더를 추가하세요. 폴더 안의 이미지는 선택한 유형으로 등록됩니다."),
+    element("label", "정답 유형", {for:"training-label"}), label, picker.fields, picker.status,
     container("actions", button("학습 데이터에 추가", () => perform(async () => {
-      const selected = [...files.input.files];
-      if (!selected.length) throw new Error("추가할 이미지를 선택하세요.");
-      const entries = await labeledFiles(selected, label.value);
+      const entries = await labeledFiles(picker.images(), label.value);
       await saveProduct({...product, data:[...product.data, ...entries]});
     }, "선택한 제품의 학습 데이터에 추가했습니다."))));
   const distribution = [NORMAL, ...product.types].map(type => [type, product.data.filter(item => item.label === type).length + "장"]);
@@ -630,7 +678,7 @@ async function runInspection(product, files, source, name) {
   if (!files.length) throw new Error("검사할 이미지를 선택하세요.");
   const records = [];
   for (const file of files) {
-    records.push({name:file.name, file, ...classify(await imageFeatures(file), product.model)});
+    records.push({name:imageName(file), file, ...classify(await imageFeatures(file), product.model)});
   }
   const run = {
     id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
@@ -646,14 +694,14 @@ async function runInspection(product, files, source, name) {
 function renderInspection(product) {
   const section = panel("검사 이미지 업로드");
   section.append(element("p", product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다." : "검사를 시작하려면 제품을 학습하세요."));
-  const files = fileInput("검사할 이미지", "inspection-files");
+  const picker = imagePicker("inspection");
   const name = element("input", undefined, {
     type:"text", id:"inspection-name", maxlength:"80", placeholder:"예: 제품 C · 1차 평가",
   });
-  section.append(element("label", "검사 결과 이름 (선택)", {for:"inspection-name"}), name, files.label, files.input);
+  section.append(element("label", "검사 결과 이름 (선택)", {for:"inspection-name"}), name, picker.fields, picker.status);
   const actions = container("actions");
   const run = button("검사 실행", () => perform(() =>
-    runInspection(product, [...files.input.files], "업로드", name.value), "검사 결과를 저장했습니다."), true);
+    runInspection(product, picker.images(), "업로드", name.value), "검사 결과를 저장했습니다."), true);
   run.disabled = !product.model;
   actions.append(run);
   if (product.sample) {

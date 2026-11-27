@@ -78,8 +78,7 @@ th{color:var(--muted);font-weight:650}
 .bar-track span{display:block;background:#18859a;height:100%;border-radius:20px}
 .thumb{display:block;width:68px;height:52px;object-fit:contain;background:#e8eef3;border-radius:5px}
 .review-image{display:block;width:100%;max-height:400px;object-fit:contain;background:#eef3f6;border-radius:8px;margin-top:10px}
-#notice{margin:0 0 14px;padding:9px 12px;background:#e5f3ef;color:#235943;border-radius:7px}
-#notice.error{background:#faece7;color:var(--danger)}
+
 dialog{max-width:min(94vw,490px);width:100%;border:1px solid var(--line);border-radius:12px;padding:22px;color:var(--ink)}
 dialog::backdrop{background:#10222d99}
 dialog .actions{margin-top:16px}
@@ -88,21 +87,20 @@ dialog p{margin-top:8px;overflow-wrap:anywhere}
 fieldset{padding:0;border:0;margin:0}
 .checks label{display:inline-flex;gap:7px;align-items:center;margin:7px 12px 7px 0}
 @media(max-width:640px){main{padding:22px 12px}.panel{padding:15px}.columns,.record-filters{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:7px}.bar-row{grid-template-columns:minmax(75px,120px) 1fr auto}}
-#inspection-progress {width:min(470px,88vw);padding:32px;border:0;border-radius:14px}
-#inspection-progress::backdrop {background:rgba(12,31,44,.62)}
-#inspection-progress h2 {font-size:1.65rem;margin:0 0 12px}
-#inspection-progress progress {width:100%;height:18px;accent-color:#126078}
-#progress-count {font-size:1.2rem;font-weight:700}
-#error-dialog {width:min(500px,88vw);border:0;border-top:5px solid #b53d33;padding:30px;border-radius:14px}
-#error-dialog::backdrop {background:rgba(12,31,44,.62)}
-#error-dialog h2 {font-size:1.55rem;margin:0 0 14px}
-#error-message {white-space:pre-line;line-height:1.65;overflow-wrap:anywhere}
+#task-dialog {width:min(500px,88vw);padding:30px;border:0;border-top:5px solid #14647a;border-radius:14px}
+#task-dialog::backdrop {background:rgba(12,31,44,.62)}
+#task-dialog[data-state="error"] {border-color:#b53d33}
+#task-dialog[data-state="done"] {border-color:#247353}
+#task-dialog h2 {font-size:1.65rem;margin:0 0 12px}
+#task-message {white-space:pre-line;overflow-wrap:anywhere}
+#task-dialog progress {width:100%;height:18px;accent-color:#126078}
+#task-count {font-weight:700}
 </style>
 </head>
 <body>
 <header><strong>비전 검사 작업대</strong><span>중간평가 데모 · 브라우저 저장</span></header>
 <main>
-  <div id="notice" role="status" hidden></div>
+
   <div id="view"></div>
 </main>
 <dialog id="product-dialog">
@@ -140,14 +138,11 @@ fieldset{padding:0;border:0;margin:0}
     </div>
   </form>
 </dialog>
-<dialog id="inspection-progress" aria-labelledby="progress-title">
-<h2 id="progress-title">검사 진행 중</h2><p id="progress-product"></p>
-<progress id="progress-bar" aria-label="완료한 이미지"></progress>
-<div aria-live="polite"><p id="progress-count"></p><p id="progress-stage"></p></div>
-</dialog>
-<dialog id="error-dialog" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-message">
-<h2 id="error-title">작업을 완료할 수 없습니다</h2><p id="error-message"></p>
-<form method="dialog"><button class="btn primary" autofocus>확인</button></form>
+<dialog id="task-dialog" aria-labelledby="task-title" aria-describedby="task-message">
+<div aria-live="polite"><h2 id="task-title"></h2><p id="task-message"></p><p id="task-count"></p></div>
+<progress id="task-bar" aria-label="작업 진행률"></progress>
+<p id="task-clock" aria-live="off"></p>
+<form method="dialog" id="task-actions"><button class="btn primary">확인</button></form>
 </dialog>
 <script>
 "use strict";
@@ -203,16 +198,40 @@ function container(className, ...children) {
   return div;
 }
 
-function notify(message = "", error = false) {
-  const notice = byId("notice");
-  notice.textContent = message;
-  notice.hidden = !message || error;
-  if (error) {
-    const dialog = byId("error-dialog");
-    byId("error-message").textContent = message;
-    if (!dialog.open) dialog.showModal();
+let taskTimer;
+function taskStatus(state,title,message) {
+  const dialog = byId("task-dialog");
+  const running = state === "running";
+  const startClock = running && (!dialog.open || dialog.dataset.state !== "running");
+  dialog.dataset.state = state;
+  dialog.oncancel = event => { if (dialog.dataset.state === "running") event.preventDefault(); };
+  byId("task-title").textContent = title;
+  byId("task-message").textContent = message;
+  byId("task-count").textContent = "";
+  const bar = byId("task-bar");
+  bar.hidden = !running;
+  bar.removeAttribute("value");
+  byId("task-actions").hidden = running;
+  byId("task-clock").hidden = !running;
+  if (startClock) {
+    const start = Date.now();
+    const tick = () => {
+      const seconds = Math.floor((Date.now()-start)/1000);
+      byId("task-clock").textContent = "경과 시간 " + Math.floor(seconds/60) + "분 " + seconds%60 + "초";
+    };
+    clearInterval(taskTimer);
+    tick();
+    taskTimer = setInterval(tick,1000);
   }
-  notice.className = error ? "error" : "";
+  if (!running) clearInterval(taskTimer);
+  if (!dialog.open) dialog.showModal();
+  if (!running) byId("task-actions").querySelector("button").focus({preventScroll:true});
+}
+
+function imageCount(done,total) {
+  byId("task-bar").max = total;
+  byId("task-bar").value = done;
+  byId("task-count").textContent = done + " / " + total + "장 완료";
 }
 
 function imageName(file) {
@@ -305,7 +324,7 @@ function openDatabase() {
         }
       };
     };
-    request.onblocked = () => notify("다른 탭의 비전 검사 작업대를 닫으면 저장소 업데이트가 이어집니다.", true);
+    request.onblocked = () => taskStatus("error","저장소 업데이트 대기","다른 탭의 비전 검사 작업대를 닫으면 업데이트가 이어집니다.");
     request.onsuccess = () => {
       request.result.onversionchange = () => request.result.close();
       resolve(request.result);
@@ -354,21 +373,21 @@ async function saveProduct(product) {
   else products[index] = snapshot;
 }
 
-async function perform(work, success) {
+async function perform(work, success, action) {
   if (busy) return;
   busy = true;
   app.inert = true;
-  notify("처리 중입니다.");
+  taskStatus("running",action + " 진행 중","작업을 처리하고 있습니다.");
   try {
-    await work();
+    const detail = await work();
     render();
-    notify(success);
+    taskStatus("done",action + " 완료",detail || success);
   } catch (error) {
     if (error?.message.startsWith("다른 탭에서")) {
       products = await readProducts();
       render();
     }
-    notify(error?.message || "처리할 수 없습니다. 파일 형식과 브라우저 저장 공간을 확인하세요.", true);
+    taskStatus("error",action + " 오류",error?.message || "파일 형식과 브라우저 저장 공간을 확인하세요.");
   } finally {
     app.inert = false;
     busy = false;
@@ -393,7 +412,7 @@ function enterProduct(product) {
   selectedRun = null;
   selectedReview = null;
   historyQuery = "";
-  notify();
+
   render();
 }
 
@@ -444,12 +463,12 @@ function renderHome() {
 
 function setTab(tab) {
   currentTab = tab;
-  notify();
+
   render();
 }
 
 function renderProduct(product) {
-  const back = button("제품 목록", () => { currentId = null; notify(); render(); });
+  const back = button("제품 목록", () => { currentId = null; render(); });
   back.classList.add("back");
   app.append(back, container("page-head",
     container("", element("h1", product.name), element("p", product.types.length ? product.types.join(" · ") : "불량 유형을 등록하세요.")),
@@ -542,6 +561,7 @@ async function commitTraining(product) {
   const model = await buildModel({...product,data});
   await saveProduct({...product, data:[], model, requiresRetraining:false, lastModelVersion:model.version,
     trainingHistory:[...history,{model,entries:product.data}]});
+  return product.name + " · v" + model.version + " · " + model.trainingCount + "장 학습 완료\n학습 이력에 저장했습니다.";
 }
 
 function rollbackTraining(product, remaining) {
@@ -596,7 +616,7 @@ async function buildModel(product) {
   const missing = labels.filter(label => !entries.some(item => item.label === label));
   if (!product.types.length || missing.length) throw new Error("정상과 각 불량 유형의 학습 폴더를 등록하세요. " + missing.join(", "));
   if (entries.some(item => !(item.file instanceof Blob))) throw new Error("원본 파일이 없는 학습 폴더를 삭제한 후 다시 등록하세요.");
-  notify(product.name + " · " + entries.length + "장 학습 중입니다. 진행 장수는 서버 창에 표시됩니다.");
+  taskStatus("running","학습 진행 중",product.name + " · 학습 이미지 " + entries.length + "장\n서버에 이미지를 보내 특징을 추출하고 제품 전용 판정층을 학습합니다.");
   const bundle = await requestModel("train", product, entries.map(x=>x.file), {
     types:product.types, labels:entries.map(x=>x.label)
   });
@@ -612,7 +632,7 @@ function renderTraining(product) {
     element("p", "한 줄에 한 유형을 입력하세요. 변경한 유형은 다음 학습부터 적용됩니다."),
     container("actions", button("유형 저장", () => perform(async () => {
       await saveProduct({...product, types:parseTypes(types.value)});
-    }, "제품의 불량 유형을 저장했습니다."))));
+    }, "제품의 불량 유형을 저장했습니다.","유형 저장"))));
 
   const data = panel("학습 이미지 등록");
   const label = selectInput("training-label", [NORMAL, ...product.types]);
@@ -621,8 +641,9 @@ function renderTraining(product) {
     element("label", "정답 유형", {for:"training-label"}), label, picker.fields, picker.status,
     container("actions", button("학습 데이터에 추가", () => perform(async () => {
       const entries = await labeledFolder(picker.images(), label.value);
-      await addTrainingFolder(product, entries);
-    }, "선택한 제품의 학습 데이터에 추가했습니다."))));
+      const added = await addTrainingFolder(product, entries);
+      return label.value + " · " + added + "장을 학습 대기에 추가했습니다.";
+    }, "선택한 제품의 학습 데이터에 추가했습니다.","학습 폴더 등록"))));
   const distribution = [NORMAL, ...product.types].map(type => [type, product.data.filter(item => item.label === type).length + "장"]);
   data.append(table(["정답 유형","학습 대기 이미지"], distribution));
 
@@ -635,14 +656,14 @@ function renderTraining(product) {
       : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다.";
   train.append(element("p", modelStatus));
   const submit = button(product.model ? "추가 학습 실행" : "학습 실행", () =>
-    perform(() => commitTraining(product),"학습을 완료하고 이력에 저장했습니다."),true);
+    perform(() => commitTraining(product),"학습을 완료하고 이력에 저장했습니다.","학습"),true);
   submit.disabled = !product.data.length;
   train.append(element("p","학습 대기 "+product.data.length+"장"),submit);
   app.append(container("columns", setup, data), renderTrainingFolders(product), train, renderTrainingHistory(product));
 }
 
 function confirmTrainingChange(title, message, work, success) {
-  pendingTrainingChange = {work, success};
+  pendingTrainingChange = {work, success, title};
   byId("training-change-title").textContent = title;
   byId("training-change-message").textContent = message;
   byId("training-change-dialog").showModal();
@@ -741,7 +762,7 @@ async function inspectProduct(product, files) {
   const records = [];
   for (let start = 0; start < files.length; start += 64) {
     const group = files.slice(start,start+64);
-    byId("progress-stage").textContent = (start+1)+"–"+(start+group.length)+"번째 이미지 판정 중";
+    byId("task-message").textContent = (start+1)+"–"+(start+group.length)+"번째 이미지 판정 중";
     const rows = await requestModel("inspect",product,group,product.model.bundle);
     if (!Array.isArray(rows) || rows.length !== group.length) throw new Error("이미지 수와 판정 수가 다릅니다.");
     rows.forEach((row,i) => {
@@ -751,32 +772,22 @@ async function inspectProduct(product, files) {
       records.push({file:group[i], name:imageName(group[i]), status, reason, types:row.types,
         initial:row.review_score == null ? DEFECT : NORMAL});
     });
-    byId("progress-bar").value = records.length;
-    byId("progress-count").textContent = records.length + " / " + files.length + "장 완료";
+    imageCount(records.length,files.length);
   }
   return records;
 }
 
 async function runInspection(product, files, source, name) {
   if (!usableModel(product) || product.requiresRetraining) throw new Error("이 제품을 먼저 학습하세요.");
-  const dialog = byId("inspection-progress");
-  byId("progress-product").textContent = product.name + " · v" + product.model.version;
-  byId("progress-bar").max = files.length;
-  byId("progress-bar").value = 0;
-  byId("progress-count").textContent = "0 / " + files.length + "장 완료";
-  byId("progress-stage").textContent = "검사 서버 연결 중";
-  dialog.oncancel = event => event.preventDefault();
-  dialog.showModal();
-  try {
-    await saveInspection(product,files,source,name);
-  } finally {
-    dialog.close();
-  }
+  taskStatus("running","검사 진행 중",product.name + " · v" + product.model.version);
+  imageCount(0,files.length);
+  await saveInspection(product,files,source,name);
+  return product.name + " · " + files.length + "장 검사를 완료하고 결과를 저장했습니다.";
 }
 
 async function saveInspection(product, files, source, name) {
   const records = await inspectProduct(product, files);
-  byId("progress-stage").textContent = "검사 결과 저장 중";
+  byId("task-message").textContent = "검사 결과 저장 중";
   const run = {
     id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
     types:product.model.types,
@@ -801,7 +812,7 @@ function renderInspection(product) {
   section.append(element("label", "검사 결과 이름 (선택)", {for:"inspection-name"}), name, picker.fields, picker.status);
   const actions = container("actions");
   const run = button("검사 실행", () => perform(() =>
-    runInspection(product, picker.images(), "업로드", name.value), "검사 결과를 저장했습니다."), true);
+    runInspection(product, picker.images(), "업로드", name.value), "검사 결과를 저장했습니다.","검사"), true);
   run.disabled = !ready;
   actions.append(run);
   section.append(actions);
@@ -873,7 +884,7 @@ function renderRunTitle(product, section, run) {
       const runs = product.runs.map(item => item.id === run.id ? {...item, name:newName} : item);
       await saveProduct({...product, runs});
       historyQuery = "";
-    }, "결과 이름을 저장했습니다.");
+    }, "결과 이름을 저장했습니다.","결과 이름 저장");
   };
   section.append(container("row history-title", title, edit), editor);
 }
@@ -926,7 +937,7 @@ function renderReview(product) {
         : entry);
       const runs = product.runs.map(entry => entry.id === run.id ? {...entry, records} : entry);
       await saveProduct({...product, runs});
-    }, "최종 판정을 제품 이력에 저장했습니다."), true)));
+    }, "최종 판정을 제품 이력에 저장했습니다.","최종 판정 저장"), true)));
   app.append(detail);
 }
 
@@ -1006,7 +1017,7 @@ byId("delete-form").onsubmit = event => {
   perform(async () => {
     await storeProduct(product, {remove:true});
     products = products.filter(item => item.id !== product.id);
-  }, "‘" + product.name + "’ 제품을 삭제했습니다.");
+  }, "‘" + product.name + "’ 제품을 삭제했습니다.","제품 삭제");
 };
 byId("delete-dialog").onclose = () => { deleteTarget = null; };
 
@@ -1015,7 +1026,7 @@ byId("training-change-form").onsubmit = event => {
   event.preventDefault();
   const change = pendingTrainingChange;
   byId("training-change-dialog").close();
-  if (change) perform(change.work, change.success);
+  if (change) perform(change.work, change.success, change.title);
 };
 byId("training-change-dialog").onclose = () => { pendingTrainingChange = null; };
 
@@ -1038,10 +1049,10 @@ byId("product-form").onsubmit = async event => {
       historyQuery = "";
       productQuery = "";
       event.target.reset();
-    }, "제품을 등록했습니다.");
+    }, "제품을 등록했습니다.","제품 등록");
   } catch (error) {
     byId("product-dialog").close();
-    notify(error.message, true);
+    taskStatus("error","제품 등록 오류",error.message);
   }
 };
 
@@ -1050,9 +1061,9 @@ byId("product-form").onsubmit = async event => {
     db = await openDatabase();
     products = await readProducts();
     render();
-    notify();
+
   } catch (error) {
-    notify("브라우저 저장소를 열 수 없습니다. " + error.message, true);
+    taskStatus("error","저장소 오류","브라우저 저장소를 열 수 없습니다. " + error.message);
   }
 })();
 </script>

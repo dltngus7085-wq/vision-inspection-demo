@@ -446,53 +446,6 @@ function renderProduct(product) {
   renderTab[currentTab](product);
 }
 
-async function imageFeatures(file) {
-  let bitmap;
-  try { bitmap = await createImageBitmap(file); }
-  catch { throw new Error(imageName(file) + " 이미지를 읽을 수 없습니다."); }
-  const canvas = element("canvas");
-  canvas.width = canvas.height = 32;
-  const ctx = canvas.getContext("2d", {willReadFrequently:true});
-  ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, 32, 32);
-  ctx.drawImage(bitmap, 0, 0, 32, 32);
-  bitmap.close();
-  const data = ctx.getImageData(0, 0, 32, 32).data;
-  const color = [];
-  const texture = [];
-  for (let y = 0; y < 32; y += 4) {
-    for (let x = 0; x < 32; x += 4) {
-      const sum = [0, 0, 0];
-      let edges = 0;
-      for (let dy = 0; dy < 4; dy++) {
-        for (let dx = 0; dx < 4; dx++) {
-          const offset = 4 * ((y + dy) * 32 + x + dx);
-          for (let channel = 0; channel < 3; channel++) sum[channel] += data[offset + channel];
-          if (dx < 3) {
-            for (let channel = 0; channel < 3; channel++) {
-              edges += Math.abs(data[offset + channel] - data[offset + 4 + channel]);
-            }
-          }
-        }
-      }
-      color.push(...sum.map(total => total / (16 * 255)));
-      texture.push(edges / (36 * 255));
-    }
-  }
-  return {color, texture};
-}
-
-function distance(a, b) {
-  return Math.sqrt(a.reduce((sum, value, index) => sum + (value - b[index]) ** 2, 0) / a.length);
-}
-
-function closest(feature, groups, key) {
-  return groups.map(group => ({
-    label:group.label,
-    distance:group.samples.reduce((best, sample) => Math.min(best, distance(feature[key], sample[key])), Infinity),
-  })).sort((a, b) => a.distance - b.distance);
-}
-
 async function labeledFolder(files, label) {
   const folder = {
     id:crypto.randomUUID(),
@@ -501,7 +454,7 @@ async function labeledFolder(files, label) {
   };
   const entries = [];
   for (const file of files) {
-    entries.push({label, folder, name:imageName(file), file, features:await imageFeatures(file)});
+    entries.push({label, folder, name:imageName(file), file});
   }
   return entries;
 }
@@ -511,37 +464,39 @@ function lastModelVersion(product) {
   return product.runs.reduce((latest, run) => Math.max(latest, run.version), current);
 }
 
-function buildModel(product) {
-  if (!product.types.length) throw new Error("불량 유형을 먼저 등록하세요.");
-  const groups = [NORMAL, ...product.types].map(label => ({
-    label, samples:product.data.filter(entry => entry.label === label).map(entry => entry.features),
-  }));
-  const missing = groups.filter(group => !group.samples.length).map(group => group.label);
-  if (missing.length) throw new Error("학습 이미지가 필요한 항목 · " + missing.join(", "));
-  return {
-    version:lastModelVersion(product) + 1,
-    createdAt:new Date().toISOString(),
-    types:[...product.types],
-    trainingCount:groups.reduce((count, group) => count + group.samples.length, 0),
-    groups,
-  };
+const ENGINE = "dino-b-convnextv2-b-v1";
+function usableModel(product) {
+  return product.model?.bundle?.engine === ENGINE && product.model.bundle.product === product.id;
 }
-
-function classify(features, model) {
-  const scores = closest(features, model.groups, "color");
-  const types = scores.filter(score => score.label !== NORMAL);
-  const normal = scores.find(score => score.label === NORMAL);
-  const nearestType = types[0];
-  if (normal.distance <= nearestType.distance) {
-    const [textureMatch] = closest(features, model.groups, "texture");
-    if (textureMatch.label !== NORMAL) return {initial:NORMAL, status:REVIEW, reason:CHECK_NORMAL, types:[]};
-    return {initial:NORMAL, status:NORMAL, reason:"", types:[]};
+async function requestModel(path, product, files, meta) {
+  const form = new FormData();
+  form.append("meta", JSON.stringify(meta));
+  for (const file of files) form.append("images",file,file.name || "image");
+  let response;
+  try {
+    response = await fetch("http://127.0.0.1:8511/" + path, {
+      method:"POST", credentials:"omit", headers:{"X-Inspection-Product":product.id}, body:form
+    });
+  } catch {
+    throw new Error("이 PC의 제품 학습 서버를 실행하고 로컬 네트워크 접근을 허용하세요.");
   }
-  const next = types[1];
-  if (nearestType.distance > .075 || (next && next.distance - nearestType.distance < .008)) {
-    return {initial:DEFECT, status:REVIEW, reason:CHECK_TYPE, types:[]};
-  }
-  return {initial:DEFECT, status:DEFECT, reason:"", types:[nearestType.label]};
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || "제품 학습 서버 업데이트와 연결 상태를 확인하세요.");
+  return result;
+}
+async function buildModel(product) {
+  const labels = [NORMAL,...product.types];
+  const entries = product.data.filter(item => labels.includes(item.label));
+  const missing = labels.filter(label => !entries.some(item => item.label === label));
+  if (!product.types.length || missing.length) throw new Error("정상과 각 불량 유형의 학습 폴더를 등록하세요. " + missing.join(", "));
+  if (entries.some(item => !(item.file instanceof Blob))) throw new Error("원본 파일이 없는 학습 폴더를 삭제한 후 다시 등록하세요.");
+  notify(product.name + " · " + entries.length + "장 학습 중입니다. 진행 장수는 서버 창에 표시됩니다.");
+  const bundle = await requestModel("train", product, entries.map(x=>x.file), {
+    types:product.types, labels:entries.map(x=>x.label)
+  });
+  if (bundle.engine !== ENGINE || bundle.product !== product.id) throw new Error("제품 학습 응답을 확인하세요.");
+  return {version:lastModelVersion(product)+1, createdAt:new Date().toISOString(), types:[...product.types],
+    trainingCount:entries.length, bundle, folderIds:[...new Set(entries.map(x=>x.folder?.id || "legacy"))]};
 }
 
 function renderTraining(product) {
@@ -568,14 +523,14 @@ function renderTraining(product) {
   const train = panel("모델 학습");
   const modelStatus = product.requiresRetraining
     ? "학습에 사용한 이미지가 삭제되었습니다. 남은 데이터로 다시 학습하면 검사를 시작할 수 있습니다."
-    : product.model
+    : usableModel(product)
       ? "현재 검사에 적용 중인 버전 v" + product.model.version + " · " + product.model.types.join(", ")
         + (product.model.trainingCount ? " · 학습 이미지 " + product.model.trainingCount + "장" : "")
       : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다.";
   train.append(element("p", modelStatus));
   const trainLabel = product.requiresRetraining ? "다시 학습" : product.model ? "추가 학습 실행" : "학습 실행";
   const actions = container("actions", button(trainLabel, () => perform(async () => {
-    const model = buildModel(product);
+    const model = await buildModel(product);
     await saveProduct({...product, model, lastModelVersion:model.version, requiresRetraining:false});
   }, "이 제품의 학습을 완료했습니다."), true));
   if (product.model) {
@@ -589,7 +544,7 @@ function renderTraining(product) {
     reset.classList.add("danger");
     actions.append(reset);
   }
-  train.append(actions, element("p", "현재 모델은 등록한 이미지의 색상과 질감 특징을 비교합니다.", {class:"note"}));
+  train.append(actions, element("p", "등록한 폴더로 이 제품의 판정층을 학습합니다. 데이터를 추가한 뒤 다시 학습하면 새 버전이 적용됩니다.", {class:"note"}));
   app.append(container("columns", setup, data), renderTrainingFolders(product), train);
 }
 
@@ -649,9 +604,7 @@ function renderTrainingFolders(product) {
     const rows = matching.map(folder => {
       const remove = button("삭제", () => {
         const images = new Set(folder.records);
-        // IndexedDB preserves the shared feature references in a saved product.
-        const modelSamples = new Set(product.model?.groups.flatMap(group => group.samples));
-        const usedInModel = folder.records.some(record => modelSamples.has(record.features));
+        const usedInModel = folder.records.some(record => product.model?.folderIds?.includes(record.folder?.id || "legacy"));
         const message = "‘" + folder.name + "’의 학습 이미지 " + folder.records.length + "장을 삭제하시겠습니까?"
           + (usedInModel ? " 삭제 후에는 다시 학습해야 검사를 시작할 수 있습니다." : "");
         confirmTrainingChange("학습 폴더 삭제", message, async () => {
@@ -694,41 +647,17 @@ function table(headers, rows) {
   return container("table-wrap", item);
 }
 
-const COLAB_TYPES = ["DIE_BROKEN", "DIE_INK", "NO_DIE"];
-async function inspectWithColabModel(files) {
+async function inspectProduct(product, files) {
   const records = [];
-  for (let start = 0; start < files.length;) {
-    const group = [];
-    let bytes = 0;
-    while (start < files.length && group.length < 8) {
-      const file = files[start];
-      if (file.size > 62 * 1024 ** 2) throw new Error(imageName(file) + " 이미지가 너무 큽니다.");
-      if (group.length && bytes + file.size > 62 * 1024 ** 2) break;
-      group.push(file);
-      bytes += file.size;
-      start++;
-    }
-    notify((records.length + 1) + "–" + start + " / " + files.length + "장 검사 중");
-    const form = new FormData();
-    group.forEach(file => form.append("images", file, file.name));
-    let response;
-    try {
-      response = await fetch("http://127.0.0.1:8511/inspect", {
-        method:"POST", credentials:"omit", headers:{"X-Inspection-Product":"demo-a"}, body:form
-      });
-    } catch {
-      throw new Error("이 PC의 검사 서버에 연결할 수 없습니다. github_inspection_server.py의 Ready 표시와 브라우저의 로컬 네트워크 접근 권한을 확인하세요.");
-    }
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      throw new Error(detail.error || "검사 서버 응답 오류 (" + response.status + ")");
-    }
-    const rows = await response.json();
+  for (let start = 0; start < files.length; start += 64) {
+    const group = files.slice(start,start+64);
+    notify((start+1) + "–" + (start+group.length) + " / " + files.length + "장 검사 중");
+    const rows = await requestModel("inspect",product,group,product.model.bundle);
     if (!Array.isArray(rows) || rows.length !== group.length) throw new Error("이미지 수와 판정 수가 다릅니다.");
     rows.forEach((row,i) => {
       const status = {normal:NORMAL, defect:DEFECT, review:REVIEW}[row.status];
       const reason = {"": "", normal_disagreement:CHECK_NORMAL, other:CHECK_TYPE}[row.reason];
-      if (!status || reason === undefined || !Array.isArray(row.types) || !row.types.every(t => COLAB_TYPES.includes(t))) throw new Error("모델 응답을 확인하세요.");
+      if (!status || reason === undefined || !Array.isArray(row.types) || !row.types.every(t => product.model.types.includes(t))) throw new Error("모델 응답을 확인하세요.");
       records.push({file:group[i], name:imageName(group[i]), status, reason, types:row.types,
         initial:row.review_score == null ? DEFECT : NORMAL});
     });
@@ -736,20 +665,13 @@ async function inspectWithColabModel(files) {
   return records;
 }
 
-async function runInspection(product, files, source, name, useColab = false) {
-  if (!files.length) throw new Error("검사할 이미지를 선택하세요.");
-  let records;
-  if (useColab && product.id === "demo-a") {
-    records = await inspectWithColabModel(files);
-  } else {
-    if (product.requiresRetraining || !product.model) throw new Error("학습 탭에서 제품 모델을 먼저 학습하세요.");
-    records = [];
-    for (const file of files) records.push({name:imageName(file), file, ...classify(await imageFeatures(file), product.model)});
-  }
+async function runInspection(product, files, source, name) {
+  if (!usableModel(product) || product.requiresRetraining) throw new Error("이 제품을 먼저 학습하세요.");
+  const records = await inspectProduct(product, files);
   const run = {
-    id:crypto.randomUUID(), date:new Date().toISOString(), version:useColab ? 1 : product.model.version,
-    types:useColab ? [...COLAB_TYPES] : product.model.types,
-    source:useColab ? "Colab T4 · 2026-11-27" : source, name:name.trim(), records,
+    id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
+    types:product.model.types,
+    source, name:name.trim(), records,
   };
   await saveProduct({...product, runs:[run, ...product.runs]});
   selectedRun = run.id;
@@ -760,31 +682,18 @@ async function runInspection(product, files, source, name, useColab = false) {
 
 function renderInspection(product) {
   const section = panel("검사 이미지 업로드");
-  const browserHelp = product.requiresRetraining ? "학습에 사용한 이미지가 삭제되어 재학습이 필요합니다."
-    : product.model ? "버전 v" + product.model.version + "으로 이 제품의 이미지를 검사합니다."
-      : "검사를 시작하려면 제품을 학습하세요.";
-  const mode = product.id === "demo-a" ? selectInput("inspection-mode", [
-    {value:"colab",label:"Colab 학습 모델 · 내 PC에서 실행"},
-    {value:"browser",label:"브라우저 학습 모델"}
-  ], "colab") : null;
-  if (mode) section.append(element("label","검사 모델",{for:"inspection-mode"}),mode);
-  const help = element("p");
-  section.append(help);
-  const picker = imagePicker("inspection");
+  const ready = usableModel(product) && !product.requiresRetraining;
+  section.append(element("p", ready ? product.name + " · 학습 버전 v" + product.model.version :
+    "이 제품의 학습 탭에서 학습 실행을 누른 뒤 검사하세요."));
+  const picker = imagePicker("inspection", {folderOnly:true});
   const name = element("input", undefined, {
     type:"text", id:"inspection-name", maxlength:"80", placeholder:"예: 제품 C · 1차 평가",
   });
   section.append(element("label", "검사 결과 이름 (선택)", {for:"inspection-name"}), name, picker.fields, picker.status);
   const actions = container("actions");
   const run = button("검사 실행", () => perform(() =>
-    runInspection(product, picker.images(), "업로드", name.value, mode?.value === "colab"), "검사 결과를 저장했습니다."), true);
-  function updateMode() {
-    const colab = mode?.value === "colab";
-    help.textContent = colab ? "내 PC의 검사 서버를 실행한 뒤 폴더를 선택하세요. 검사 유형: " + COLAB_TYPES.join(" · ") : browserHelp;
-    run.disabled = !colab && (!product.model || product.requiresRetraining);
-  }
-  if (mode) mode.onchange = updateMode;
-  updateMode();
+    runInspection(product, picker.images(), "업로드", name.value), "검사 결과를 저장했습니다."), true);
+  run.disabled = !ready;
   actions.append(run);
   section.append(actions);
   app.append(section);

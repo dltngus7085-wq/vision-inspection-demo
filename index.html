@@ -93,6 +93,10 @@ fieldset{padding:0;border:0;margin:0}
 #inspection-progress h2 {font-size:1.65rem;margin:0 0 12px}
 #inspection-progress progress {width:100%;height:18px;accent-color:#126078}
 #progress-count {font-size:1.2rem;font-weight:700}
+#error-dialog {width:min(500px,88vw);border:0;border-top:5px solid #b53d33;padding:30px;border-radius:14px}
+#error-dialog::backdrop {background:rgba(12,31,44,.62)}
+#error-dialog h2 {font-size:1.55rem;margin:0 0 14px}
+#error-message {white-space:pre-line;line-height:1.65;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -140,6 +144,10 @@ fieldset{padding:0;border:0;margin:0}
 <h2 id="progress-title">검사 진행 중</h2><p id="progress-product"></p>
 <progress id="progress-bar" aria-label="완료한 이미지"></progress>
 <div aria-live="polite"><p id="progress-count"></p><p id="progress-stage"></p></div>
+</dialog>
+<dialog id="error-dialog" role="alertdialog" aria-labelledby="error-title" aria-describedby="error-message">
+<h2 id="error-title">작업을 완료할 수 없습니다</h2><p id="error-message"></p>
+<form method="dialog"><button class="btn primary" autofocus>확인</button></form>
 </dialog>
 <script>
 "use strict";
@@ -198,7 +206,12 @@ function container(className, ...children) {
 function notify(message = "", error = false) {
   const notice = byId("notice");
   notice.textContent = message;
-  notice.hidden = !message;
+  notice.hidden = !message || error;
+  if (error) {
+    const dialog = byId("error-dialog");
+    byId("error-message").textContent = message;
+    if (!dialog.open) dialog.showModal();
+  }
   notice.className = error ? "error" : "";
 }
 
@@ -571,7 +584,7 @@ async function requestModel(path, product, files, meta) {
       method:"POST", credentials:"omit", headers:{"X-Inspection-Product":product.id}, body:form
     });
   } catch {
-    throw new Error("이 PC의 제품 학습 서버를 실행하고 로컬 네트워크 접근을 허용하세요.");
+    throw new Error((path === "train" ? "학습" : "검사") + " 서버와 통신할 수 없습니다.\n\n1. 서버 창에 Ready: product training and inspection이 표시됐는지 확인하세요.\n2. OPTIONS /train 403이 보이면 최신 서버 파일로 교체하고 재시작하세요.\n3. GitHub Pages 웹 주소를 열고 브라우저에서 요청하면 로컬 네트워크 접근을 허용하세요.");
   }
   const result = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(result.error || "제품 학습 서버 업데이트와 연결 상태를 확인하세요.");

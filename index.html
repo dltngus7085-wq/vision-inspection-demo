@@ -88,6 +88,11 @@ dialog p{margin-top:8px;overflow-wrap:anywhere}
 fieldset{padding:0;border:0;margin:0}
 .checks label{display:inline-flex;gap:7px;align-items:center;margin:7px 12px 7px 0}
 @media(max-width:640px){main{padding:22px 12px}.panel{padding:15px}.columns,.record-filters{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}th,td{padding:7px}.bar-row{grid-template-columns:minmax(75px,120px) 1fr auto}}
+#inspection-progress {width:min(470px,88vw);padding:32px;border:0;border-radius:14px}
+#inspection-progress::backdrop {background:rgba(12,31,44,.62)}
+#inspection-progress h2 {font-size:1.65rem;margin:0 0 12px}
+#inspection-progress progress {width:100%;height:18px;accent-color:#126078}
+#progress-count {font-size:1.2rem;font-weight:700}
 </style>
 </head>
 <body>
@@ -130,6 +135,11 @@ fieldset{padding:0;border:0;margin:0}
       <button class="btn danger-solid" type="submit">삭제 확인</button>
     </div>
   </form>
+</dialog>
+<dialog id="inspection-progress" aria-labelledby="progress-title">
+<h2 id="progress-title">검사 진행 중</h2><p id="progress-product"></p>
+<progress id="progress-bar" aria-label="완료한 이미지"></progress>
+<div aria-live="polite"><p id="progress-count"></p><p id="progress-stage"></p></div>
 </dialog>
 <script>
 "use strict";
@@ -294,7 +304,7 @@ function openDatabase() {
 function readProducts() {
   return new Promise((resolve, reject) => {
     const request = db.transaction("products").objectStore("products").getAll();
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => resolve(request.result.map(upgradeTraining));
     request.onerror = () => reject(request.error);
   });
 }
@@ -468,6 +478,89 @@ const ENGINE = "dino-b-convnextv2-b-v1";
 function usableModel(product) {
   return product.model?.bundle?.engine === ENGINE && product.model.bundle.product === product.id;
 }
+function upgradeTraining(product) {
+  if (product.trainingHistory) return product;
+  const updated = {...product, trainingHistory:[], lastModelVersion:lastModelVersion(product)};
+  if (usableModel(product) && !product.requiresRetraining) {
+    const model = product.model;
+    const used = product.data.filter(x => [NORMAL,...model.types].includes(x.label) &&
+      model.folderIds.includes(x.folder?.id || "legacy"));
+    if (used.length === model.trainingCount) {
+      const trained = new Set(used);
+      updated.data = product.data.filter(x => !trained.has(x));
+      updated.trainingHistory = [{model, entries:used}];
+      return updated;
+    }
+  }
+  return {...updated, model:null, requiresRetraining:false};
+}
+
+async function imageDigest(entry) {
+  if (entry.digest) return entry.digest;
+  if (!(entry.file instanceof Blob)) return null;
+  const hash = await crypto.subtle.digest("SHA-256",await entry.file.arrayBuffer());
+  return Array.from(new Uint8Array(hash),byte => byte.toString(16).padStart(2,"0")).join("");
+}
+
+async function addTrainingFolder(product, entries) {
+  const existing = [...(product.trainingHistory || []).flatMap(run => run.entries), ...product.data];
+  const label = entries[0].label;
+  const known = new Set();
+  for (const item of existing.filter(item => item.label === label)) known.add(await imageDigest(item));
+  const fresh = [];
+  for (const entry of entries) {
+    const digest = await imageDigest(entry);
+    if (known.has(digest)) continue;
+    known.add(digest);
+    fresh.push({...entry, digest});
+  }
+  if (!fresh.length) throw new Error("이 폴더의 이미지는 모두 같은 유형으로 이미 등록되었습니다.");
+  await saveProduct({...product, data:[...product.data,...fresh]});
+  return fresh.length;
+}
+
+async function commitTraining(product) {
+  if (!product.data.length) throw new Error("새 학습 폴더를 등록하세요.");
+  if (product.data.some(entry => ![NORMAL,...product.types].includes(entry.label))) {
+    throw new Error("대기 폴더에 현재 유형에서 제외된 항목이 있습니다. 해당 폴더를 삭제하거나 유형을 다시 등록하세요.");
+  }
+  const history = product.trainingHistory || [];
+  const data = [...history.flatMap(row => row.entries), ...product.data];
+  const model = await buildModel({...product,data});
+  await saveProduct({...product, data:[], model, requiresRetraining:false, lastModelVersion:model.version,
+    trainingHistory:[...history,{model,entries:product.data}]});
+}
+
+function rollbackTraining(product, remaining) {
+  return saveProduct({...product,trainingHistory:remaining,model:remaining.at(-1)?.model || null,
+    requiresRetraining:false,lastModelVersion:lastModelVersion(product)});
+}
+
+function renderTrainingHistory(product) {
+  const section = panel("학습 이력");
+  const history = product.trainingHistory || [];
+  if (!history.length) {
+    section.append(element("p","학습이 완료되면 버전과 사용한 이미지 수가 표시됩니다."));
+    return section;
+  }
+  const rows = history.map(({model,entries},i) => {
+    const remove = button("삭제", () => {
+      const remaining = history.slice(0,i);
+      const restored = remaining.at(-1)?.model || null;
+      const versions = history.slice(i).map(row => "v"+row.model.version).join(", ");
+      confirmTrainingChange("학습 이력 삭제",
+        versions + "의 학습 데이터와 모델을 삭제하시겠습니까? " +
+        (restored ? "검사에는 v"+restored.version+"을 적용합니다." : "이 제품은 학습 전 상태로 돌아갑니다."),
+        () => rollbackTraining(product,remaining),"학습 이력을 삭제했습니다.");
+    });
+    remove.classList.add("danger");
+    return ["v"+model.version+(i===history.length-1?" · 사용 중":""), new Date(model.createdAt).toLocaleString("ko-KR"),
+      entries.length+"장", model.trainingCount+"장", trainingFolders({ ...product,data:entries }).map(x=>x.name).join(", "),remove];
+  }).reverse();
+  section.append(table(["버전","학습 완료","이번 등록","누적 학습","폴더","관리"],rows));
+  return section;
+}
+
 async function requestModel(path, product, files, meta) {
   const form = new FormData();
   form.append("meta", JSON.stringify(meta));
@@ -515,10 +608,10 @@ function renderTraining(product) {
     element("label", "정답 유형", {for:"training-label"}), label, picker.fields, picker.status,
     container("actions", button("학습 데이터에 추가", () => perform(async () => {
       const entries = await labeledFolder(picker.images(), label.value);
-      await saveProduct({...product, data:[...product.data, ...entries]});
+      await addTrainingFolder(product, entries);
     }, "선택한 제품의 학습 데이터에 추가했습니다."))));
   const distribution = [NORMAL, ...product.types].map(type => [type, product.data.filter(item => item.label === type).length + "장"]);
-  data.append(table(["정답 유형","등록 이미지"], distribution));
+  data.append(table(["정답 유형","학습 대기 이미지"], distribution));
 
   const train = panel("모델 학습");
   const modelStatus = product.requiresRetraining
@@ -528,24 +621,11 @@ function renderTraining(product) {
         + (product.model.trainingCount ? " · 학습 이미지 " + product.model.trainingCount + "장" : "")
       : "정상과 등록한 모든 불량 유형에 이미지가 있어야 학습할 수 있습니다.";
   train.append(element("p", modelStatus));
-  const trainLabel = product.requiresRetraining ? "다시 학습" : product.model ? "추가 학습 실행" : "학습 실행";
-  const actions = container("actions", button(trainLabel, () => perform(async () => {
-    const model = await buildModel(product);
-    await saveProduct({...product, model, lastModelVersion:model.version, requiresRetraining:false});
-  }, "이 제품의 학습을 완료했습니다."), true));
-  if (product.model) {
-    const reset = button("학습 모델 삭제", () => confirmTrainingChange(
-      "학습 모델 삭제",
-      "현재 모델 v" + product.model.version + "을 삭제하시겠습니까? 등록한 이미지와 이전 검사 결과는 계속 조회할 수 있습니다.",
-      async () => {
-        await saveProduct({...product, model:null, lastModelVersion:lastModelVersion(product), requiresRetraining:false});
-      },
-      "학습 모델을 삭제했습니다."));
-    reset.classList.add("danger");
-    actions.append(reset);
-  }
-  train.append(actions, element("p", "등록한 폴더로 이 제품의 판정층을 학습합니다. 데이터를 추가한 뒤 다시 학습하면 새 버전이 적용됩니다.", {class:"note"}));
-  app.append(container("columns", setup, data), renderTrainingFolders(product), train);
+  const submit = button(product.model ? "추가 학습 실행" : "학습 실행", () =>
+    perform(() => commitTraining(product),"학습을 완료하고 이력에 저장했습니다."),true);
+  submit.disabled = !product.data.length;
+  train.append(element("p","학습 대기 "+product.data.length+"장"),submit);
+  app.append(container("columns", setup, data), renderTrainingFolders(product), train, renderTrainingHistory(product));
 }
 
 function confirmTrainingChange(title, message, work, success) {
@@ -585,7 +665,7 @@ function trainingFolders(product) {
 }
 
 function renderTrainingFolders(product) {
-  const section = panel("학습 폴더 관리");
+  const section = panel("학습 대기 폴더");
   const folders = trainingFolders(product);
   if (!folders.length) {
     section.append(element("p", "등록한 학습 폴더가 여기에 표시됩니다."));
@@ -604,12 +684,9 @@ function renderTrainingFolders(product) {
     const rows = matching.map(folder => {
       const remove = button("삭제", () => {
         const images = new Set(folder.records);
-        const usedInModel = folder.records.some(record => product.model?.folderIds?.includes(record.folder?.id || "legacy"));
-        const message = "‘" + folder.name + "’의 학습 이미지 " + folder.records.length + "장을 삭제하시겠습니까?"
-          + (usedInModel ? " 삭제 후에는 다시 학습해야 검사를 시작할 수 있습니다." : "");
-        confirmTrainingChange("학습 폴더 삭제", message, async () => {
-          const data = product.data.filter(record => !images.has(record));
-          await saveProduct({...product, data, requiresRetraining:product.requiresRetraining || usedInModel});
+        const message = "‘"+folder.name+"’의 대기 이미지 "+images.size+"장을 삭제하시겠습니까?";
+        confirmTrainingChange("대기 폴더 삭제", message, async () => {
+          await saveProduct({...product, data:product.data.filter(record => !images.has(record))});
         }, "학습 폴더의 이미지를 삭제했습니다.");
       });
       remove.classList.add("danger");
@@ -651,7 +728,7 @@ async function inspectProduct(product, files) {
   const records = [];
   for (let start = 0; start < files.length; start += 64) {
     const group = files.slice(start,start+64);
-    notify((start+1) + "–" + (start+group.length) + " / " + files.length + "장 검사 중");
+    byId("progress-stage").textContent = (start+1)+"–"+(start+group.length)+"번째 이미지 판정 중";
     const rows = await requestModel("inspect",product,group,product.model.bundle);
     if (!Array.isArray(rows) || rows.length !== group.length) throw new Error("이미지 수와 판정 수가 다릅니다.");
     rows.forEach((row,i) => {
@@ -661,13 +738,32 @@ async function inspectProduct(product, files) {
       records.push({file:group[i], name:imageName(group[i]), status, reason, types:row.types,
         initial:row.review_score == null ? DEFECT : NORMAL});
     });
+    byId("progress-bar").value = records.length;
+    byId("progress-count").textContent = records.length + " / " + files.length + "장 완료";
   }
   return records;
 }
 
 async function runInspection(product, files, source, name) {
   if (!usableModel(product) || product.requiresRetraining) throw new Error("이 제품을 먼저 학습하세요.");
+  const dialog = byId("inspection-progress");
+  byId("progress-product").textContent = product.name + " · v" + product.model.version;
+  byId("progress-bar").max = files.length;
+  byId("progress-bar").value = 0;
+  byId("progress-count").textContent = "0 / " + files.length + "장 완료";
+  byId("progress-stage").textContent = "검사 서버 연결 중";
+  dialog.oncancel = event => event.preventDefault();
+  dialog.showModal();
+  try {
+    await saveInspection(product,files,source,name);
+  } finally {
+    dialog.close();
+  }
+}
+
+async function saveInspection(product, files, source, name) {
   const records = await inspectProduct(product, files);
+  byId("progress-stage").textContent = "검사 결과 저장 중";
   const run = {
     id:crypto.randomUUID(), date:new Date().toISOString(), version:product.model.version,
     types:product.model.types,
